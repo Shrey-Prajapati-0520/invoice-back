@@ -31,6 +31,27 @@
 $ npm install
 ```
 
+### OTP / Forgot password (email)
+
+The app supports forgot-password via 6-digit OTP sent to email.
+
+**Without SMTP (development):** OTP is printed to the server console:
+```
+[OTP] No SMTP configured. Code for user@example.com: 123456 (expires in 10 min)
+```
+
+**With SMTP:** Add to `.env`:
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM=Trustopay <noreply@trustopay.com>
+```
+
+- For Gmail: use an [App Password](https://support.google.com/accounts/answer/185833).
+- For reset-password to work, `SUPABASE_SERVICE_KEY` must be the **service_role** key from Supabase (Project Settings → API), not the anon key.
+
 ## Compile and run the project
 
 ```bash

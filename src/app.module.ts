@@ -9,6 +9,7 @@ import { CustomersModule } from './customers/customers.module';
 import { ItemsModule } from './items/items.module';
 import { BankAccountsModule } from './bank-accounts/bank-accounts.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { InvoicesModule } from './invoices/invoices.module';
     ItemsModule,
     BankAccountsModule,
     InvoicesModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
