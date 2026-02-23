@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
+import { MailService } from '../mail/mail.service';
 import { AuthGuard } from '../auth/auth.guard';
 
 interface InvoiceItemDto {
@@ -24,7 +25,10 @@ interface InvoiceItemDto {
 @Controller('invoices')
 @UseGuards(AuthGuard)
 export class InvoicesController {
-  constructor(private supabase: SupabaseService) {}
+  constructor(
+    private supabase: SupabaseService,
+    private mail: MailService,
+  ) {}
 
   private getClient() {
     return this.supabase.getClient();
@@ -109,7 +113,55 @@ export class InvoicesController {
       )
       .eq('id', invoice.id)
       .single();
-    return fullInvoice ?? invoice;
+
+    const resolved = fullInvoice ?? invoice;
+    const customer = resolved?.customers as { name?: string; email?: string } | null;
+    const customerName = customer?.name ?? 'Customer';
+    const customerEmail = customer?.email?.trim();
+
+    // Sender notification: insert into messages for the creator
+    try {
+      await this.getClient().from('messages').insert({
+        user_id: req.user.id,
+        title: `Invoice ${resolved.number} sent to ${customerName}`,
+        description: `You sent invoice ${resolved.number} to ${customerName}.`,
+        timestamp: new Date().toISOString(),
+        icon: 'document-text',
+        icon_color: '#7C3AED',
+        unread: true,
+      });
+    } catch {
+      // Non-fatal; invoice was created successfully
+    }
+
+    // Receiver notification: send email to customer if they have an email
+    if (customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+      try {
+        const { data: profile } = await this.getClient()
+          .from('profiles')
+          .select('full_name')
+          .eq('id', req.user.id)
+          .single();
+        const senderName = (profile as { full_name?: string } | null)?.full_name ?? 'InvoiceBill User';
+        const items = resolved?.invoice_items ?? [];
+        const total = items.reduce(
+          (sum: number, it: { qty?: number; rate?: number }) =>
+            sum + (Number(it.qty) || 0) * (Number(it.rate) || 0),
+          0,
+        );
+        const amountStr = total > 0 ? `₹${total.toLocaleString('en-IN')}` : undefined;
+        await this.mail.sendInvoiceNotificationToReceiver({
+          to: customerEmail,
+          senderName,
+          invoiceNumber: resolved.number,
+          amount: amountStr,
+        });
+      } catch {
+        // Non-fatal; invoice was created successfully
+      }
+    }
+
+    return resolved;
   }
 
   @Get(':id')
