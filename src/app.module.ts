@@ -12,6 +12,7 @@ import { BankAccountsModule } from './bank-accounts/bank-accounts.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ProfilesModule } from './profiles/profiles.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { PaymentsModule } from './payments/payments.module';
     InvoicesModule,
     QuotationsModule,
     PaymentsModule,
+    ProfilesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

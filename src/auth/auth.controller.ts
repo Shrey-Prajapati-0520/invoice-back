@@ -13,18 +13,27 @@ export class AuthController {
 
   @Post('register')
   async register(
-    @Body() body: { email: string; password: string; full_name?: string },
+    @Body() body: { email: string; password: string; full_name?: string; phone?: string },
   ) {
     const email = body?.email?.trim?.();
     if (!email) throw new BadRequestException('Email is required');
     if (!body?.password || body.password.length < 6) {
       throw new BadRequestException('Password must be at least 6 characters');
     }
+    const phone = body?.phone?.trim?.().replace(/\D/g, '') || undefined;
+    if (phone && (phone.length < 10 || !/^[6-9]\d{9}$/.test(phone))) {
+      throw new BadRequestException('Please enter a valid 10-digit Indian mobile number');
+    }
     try {
       const { data, error } = await this.supabase.getClient().auth.signUp({
         email,
         password: body.password,
-        options: { data: { full_name: body.full_name?.trim?.() } },
+        options: {
+          data: {
+            full_name: body.full_name?.trim?.(),
+            phone: phone || body.phone?.trim?.(),
+          },
+        },
       });
       if (error) throw new BadRequestException(error.message);
       // Auto-confirm email so user can login immediately

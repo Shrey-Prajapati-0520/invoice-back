@@ -34,20 +34,53 @@ export class InvoicesController {
     return this.supabase.getClient();
   }
 
+  private normalizePhone(phone: string | null | undefined): string {
+    if (!phone) return '';
+    return String(phone).replace(/\D/g, '').slice(-10);
+  }
+
   @Get()
-  async list(@Request() req: { user: { id: string } }) {
-    const { data, error } = await this.getClient()
+  async list(@Request() req: { user: { id: string; email?: string } }) {
+    const client = this.getClient();
+    const { data: sentData, error: sentErr } = await client
       .from('invoices')
-      .select(
-        `
-        *,
-        customers (id, name, phone, email)
-      `,
-      )
+      .select(`*, customers (id, name, phone, email)`)
       .eq('user_id', req.user.id)
       .order('created_at', { ascending: false });
-    if (error) throw new BadRequestException(error.message);
-    return data ?? [];
+    if (sentErr) throw new BadRequestException(sentErr.message);
+    const sent = sentData ?? [];
+
+    const { data: profile } = await client
+      .from('profiles')
+      .select('phone, email')
+      .eq('id', req.user.id)
+      .single();
+    const myPhone = this.normalizePhone((profile as { phone?: string } | null)?.phone);
+    const myEmail = ((profile as { email?: string } | null)?.email ?? req.user.email ?? '')
+      .toLowerCase()
+      .trim();
+
+    let received: unknown[] = [];
+    if (myPhone || myEmail) {
+      const orParts: string[] = [];
+      if (myPhone) orParts.push(`recipient_phone.eq.${myPhone}`);
+      if (myEmail) orParts.push(`recipient_email.eq.${myEmail}`);
+      const orFilter = orParts.join(',');
+      const q = client
+        .from('invoices')
+        .select(`*, customers (id, name, phone, email)`)
+        .neq('user_id', req.user.id)
+        .or(orFilter)
+        .order('created_at', { ascending: false });
+      const { data: receivedData } = await q;
+      const all = receivedData ?? [];
+      received = all.map((inv: Record<string, unknown>) => ({ ...inv, type: 'received' }));
+    }
+
+    return [...sent, ...received].sort(
+      (a: { created_at?: string }, b: { created_at?: string }) =>
+        (b.created_at ?? '').localeCompare(a.created_at ?? ''),
+    );
   }
 
   @Post()
@@ -69,9 +102,26 @@ export class InvoicesController {
     if (!body?.number?.trim()) {
       throw new BadRequestException('Invoice number is required');
     }
+    let recipientPhone: string | null = null;
+    let recipientEmail: string | null = null;
+    if (body.customer_id) {
+      const { data: cust } = await this.getClient()
+        .from('customers')
+        .select('phone, email')
+        .eq('id', body.customer_id)
+        .eq('user_id', req.user.id)
+        .single();
+      if (cust) {
+        const raw = (cust as { phone?: string; email?: string }).phone?.trim?.();
+        recipientPhone = raw ? raw.replace(/\D/g, '').slice(-10) || null : null;
+        recipientEmail = (cust as { email?: string }).email?.toLowerCase?.()?.trim() || null;
+      }
+    }
     const invoicePayload = {
       user_id: req.user.id,
       customer_id: body.customer_id || null,
+      recipient_phone: recipientPhone,
+      recipient_email: recipientEmail,
       number: body.number.trim(),
       due_date: body.due_date || null,
       status: body.status || 'pending',
@@ -166,23 +216,33 @@ export class InvoicesController {
 
   @Get(':id')
   async get(
-    @Request() req: { user: { id: string } },
+    @Request() req: { user: { id: string; email?: string } },
     @Param('id') id: string,
   ) {
-    const { data, error } = await this.getClient()
+    const client = this.getClient();
+    const { data: inv, error } = await client
       .from('invoices')
-      .select(
-        `
-        *,
-        customers (id, name, phone, email),
-        invoice_items (*)
-      `,
-      )
+      .select(`*, customers (id, name, phone, email), invoice_items (*)`)
       .eq('id', id)
-      .eq('user_id', req.user.id)
       .single();
-    if (error) throw new NotFoundException(error.message);
-    return data;
+    if (error || !inv) throw new NotFoundException('Invoice not found');
+    const isOwner = inv.user_id === req.user.id;
+    if (isOwner) return inv;
+    const { data: profile } = await client
+      .from('profiles')
+      .select('phone, email')
+      .eq('id', req.user.id)
+      .single();
+    const myPhone = this.normalizePhone((profile as { phone?: string } | null)?.phone);
+    const myEmail = ((profile as { email?: string } | null)?.email ?? req.user.email ?? '')
+      .toLowerCase()
+      .trim();
+    const rPhone = this.normalizePhone(inv.recipient_phone);
+    const rEmail = (inv.recipient_email ?? '').toLowerCase().trim();
+    const isRecipient =
+      (myPhone && rPhone && myPhone === rPhone) || (myEmail && rEmail && myEmail === rEmail);
+    if (!isRecipient) throw new NotFoundException('Invoice not found');
+    return { ...inv, type: 'received' };
   }
 
   @Patch(':id')
