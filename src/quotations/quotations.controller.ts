@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
+import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
 
 interface QuotationItemDto {
@@ -22,7 +23,10 @@ interface QuotationItemDto {
 @Controller('quotations')
 @UseGuards(AuthGuard)
 export class QuotationsController {
-  constructor(private supabase: SupabaseService) {}
+  constructor(
+    private supabase: SupabaseService,
+    private push: PushService,
+  ) {}
 
   private getClient() {
     return this.supabase.getClient();
@@ -234,6 +238,40 @@ export class QuotationsController {
       } catch {
         /* non-fatal */
       }
+    }
+
+    // Push notifications: sender and receivers
+    const pushRecipients: Array<{ token: string; title: string; body: string }> = [];
+    const { data: senderTokenRow } = await this.getClient()
+      .from('profiles')
+      .select('expo_push_token')
+      .eq('id', req.user.id)
+      .single();
+    const senderToken = (senderTokenRow as { expo_push_token?: string } | null)?.expo_push_token;
+    if (senderToken) {
+      pushRecipients.push({
+        token: senderToken,
+        title: `Quotation ${resolved.quo_number} sent`,
+        body: `You sent quotation ${resolved.quo_number} to ${customerName}.`,
+      });
+    }
+    for (const receiverId of receiverIds) {
+      const { data: receiverTokenRow } = await this.getClient()
+        .from('profiles')
+        .select('expo_push_token')
+        .eq('id', receiverId)
+        .single();
+      const receiverToken = (receiverTokenRow as { expo_push_token?: string } | null)?.expo_push_token;
+      if (receiverToken) {
+        pushRecipients.push({
+          token: receiverToken,
+          title: `New quotation from ${senderName}`,
+          body: `${senderName} sent you quotation ${resolved.quo_number} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
+        });
+      }
+    }
+    if (pushRecipients.length > 0) {
+      await this.push.sendMany(pushRecipients);
     }
 
     return resolved;

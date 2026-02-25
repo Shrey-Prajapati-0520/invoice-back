@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { MailService } from '../mail/mail.service';
+import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
 
 interface InvoiceItemDto {
@@ -28,6 +29,7 @@ export class InvoicesController {
   constructor(
     private supabase: SupabaseService,
     private mail: MailService,
+    private push: PushService,
   ) {}
 
   private getClient() {
@@ -262,6 +264,40 @@ export class InvoicesController {
       } catch {
         // Non-fatal; invoice was created successfully
       }
+    }
+
+    // Push notifications: sender and receivers
+    const pushRecipients: Array<{ token: string; title: string; body: string }> = [];
+    const { data: senderTokenRow } = await this.getClient()
+      .from('profiles')
+      .select('expo_push_token')
+      .eq('id', req.user.id)
+      .single();
+    const senderToken = (senderTokenRow as { expo_push_token?: string } | null)?.expo_push_token;
+    if (senderToken) {
+      pushRecipients.push({
+        token: senderToken,
+        title: `Invoice ${resolved.number} sent`,
+        body: `You sent invoice ${resolved.number} to ${customerName}.`,
+      });
+    }
+    for (const receiverId of receiverIds) {
+      const { data: receiverTokenRow } = await this.getClient()
+        .from('profiles')
+        .select('expo_push_token')
+        .eq('id', receiverId)
+        .single();
+      const receiverToken = (receiverTokenRow as { expo_push_token?: string } | null)?.expo_push_token;
+      if (receiverToken) {
+        pushRecipients.push({
+          token: receiverToken,
+          title: `New invoice from ${senderName}`,
+          body: `${senderName} sent you invoice ${resolved.number}${amountStr ? ` for ${amountStr}` : ''}.`,
+        });
+      }
+    }
+    if (pushRecipients.length > 0) {
+      await this.push.sendMany(pushRecipients);
     }
 
     return resolved;

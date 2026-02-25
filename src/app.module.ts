@@ -14,6 +14,7 @@ import { QuotationsModule } from './quotations/quotations.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { MessagesModule } from './messages/messages.module';
+import { PushModule } from './push/push.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { MessagesModule } from './messages/messages.module';
     PaymentsModule,
     ProfilesModule,
     MessagesModule,
+    PushModule,
   ],
   controllers: [AppController],
   providers: [AppService],

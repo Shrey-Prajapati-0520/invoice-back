@@ -78,6 +78,21 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Deploy to Railway
+
+Set these **environment variables** in Railway (Project → Variables). Railway does **not** read `.env` at runtime.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SUPABASE_URL` | Yes | Supabase project URL (e.g. `https://xxxx.supabase.co`) |
+| `SUPABASE_SERVICE_KEY` | Yes | **Service role** key from Supabase (Project Settings → API) |
+| `SUPABASE_ANON_KEY` | Yes | **Anon/public** key from Supabase (Project Settings → API) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Optional | For forgot-password emails |
+| SabPaisa vars | Optional | For payment integration |
+| `EXPO_ACCESS_TOKEN` | Optional | EAS access token for push notifications (enhanced security) |
+
+Where to get Supabase keys: Supabase Dashboard → Project Settings → API (Project URL, `anon` key, `service_role` key).
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

@@ -56,13 +56,16 @@ export class ProfilesController {
   async updateMe(
     @Request() req: { user: { id: string } },
     @Body()
-    body: Partial<{ full_name: string; phone: string; email: string; pincode: string }>,
+    body: Partial<{ full_name: string; phone: string; email: string; pincode: string; expo_push_token: string }>,
   ) {
     const updates: Record<string, string | null> = {};
     if (body.full_name !== undefined) updates.full_name = body.full_name?.trim() || null;
     if (body.phone !== undefined) updates.phone = body.phone?.trim()?.replace(/\D/g, '') || null;
     if (body.email !== undefined) updates.email = body.email?.trim() || null;
     if (body.pincode !== undefined) updates.pincode = body.pincode?.trim() || null;
+    if (body.expo_push_token !== undefined) {
+      updates.expo_push_token = body.expo_push_token?.trim() || null;
+    }
 
     if (Object.keys(updates).length === 0) {
       const { data } = await this.getClient()
