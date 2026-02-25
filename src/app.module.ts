@@ -13,6 +13,7 @@ import { InvoicesModule } from './invoices/invoices.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ProfilesModule } from './profiles/profiles.module';
+import { MessagesModule } from './messages/messages.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { ProfilesModule } from './profiles/profiles.module';
     QuotationsModule,
     PaymentsModule,
     ProfilesModule,
+    MessagesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -49,29 +49,32 @@ export class QuotationsController {
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
-    const meta = (req.user as { user_metadata?: { phone?: string } }).user_metadata ?? {};
+    const meta = (req.user as { user_metadata?: { phone?: string; email?: string } }).user_metadata ?? {};
     const profilePhone = (profile as { phone?: string } | null)?.phone ?? meta?.phone;
     const myPhone = this.normalizePhone(profilePhone);
-    const myEmail = ((profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? '')
-      .toLowerCase()
-      .trim();
+    const profileEmail = (profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? meta?.email ?? '';
+    const myEmail = String(profileEmail).toLowerCase().trim();
 
-    let received: unknown[] = [];
-    if (myPhone || myEmail) {
-      const orParts: string[] = [];
-      if (myPhone) orParts.push(`recipient_phone.eq.${myPhone}`);
-      if (myEmail) orParts.push(`recipient_email.eq.${myEmail}`);
-      const orFilter = orParts.join(',');
-      const q = client
+    const receivedById = new Map<string, Record<string, unknown>>();
+    if (myPhone) {
+      const { data: byPhone } = await client
         .from('quotations')
         .select(`*, customers (id, name, phone, email)`)
         .neq('user_id', req.user.id)
-        .or(orFilter)
+        .eq('recipient_phone', myPhone)
         .order('created_at', { ascending: false });
-      const { data: receivedData } = await q;
-      const all = receivedData ?? [];
-      received = all.map((quo: Record<string, unknown>) => ({ ...quo, type: 'received' }));
+      (byPhone ?? []).forEach((quo: Record<string, unknown>) => receivedById.set(String(quo.id), { ...quo, type: 'received' }));
     }
+    if (myEmail) {
+      const { data: byEmail } = await client
+        .from('quotations')
+        .select(`*, customers (id, name, phone, email)`)
+        .neq('user_id', req.user.id)
+        .eq('recipient_email', myEmail)
+        .order('created_at', { ascending: false });
+      (byEmail ?? []).forEach((quo: Record<string, unknown>) => receivedById.set(String(quo.id), { ...quo, type: 'received' }));
+    }
+    const received = Array.from(receivedById.values());
 
     return [...sent, ...received].sort(
       (a: { created_at?: string; date?: string }, b: { created_at?: string; date?: string }) =>
@@ -192,29 +195,42 @@ export class QuotationsController {
     }
 
     // Receiver in-app notification
-    if (recipientPhone || recipientEmail) {
-      try {
-        const orParts: string[] = [];
-        if (recipientPhone) orParts.push(`phone.eq.${recipientPhone}`);
-        if (recipientEmail) orParts.push(`email.eq.${recipientEmail}`);
-        const { data: receiverProfiles } = await this.getClient()
+    const receiverIds = new Set<string>();
+    if (recipientPhone) {
+      const { data: byPhone } = await this.getClient()
+        .from('profiles')
+        .select('id')
+        .eq('phone', recipientPhone)
+        .neq('id', req.user.id);
+      (byPhone ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      if (receiverIds.size === 0) {
+        const { data: byPhoneSuffix } = await this.getClient()
           .from('profiles')
           .select('id')
-          .or(orParts.join(','))
-          .neq('id', req.user.id)
-          .limit(1);
-        const receiverId = (receiverProfiles as { id: string }[] | null)?.[0]?.id;
-        if (receiverId) {
-          await this.getClient().from('messages').insert({
-            user_id: receiverId,
-            title: `New quotation ${resolved.quo_number} from ${senderName}`,
-            description: `${senderName} sent you quotation ${resolved.quo_number} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
-            timestamp: new Date().toISOString(),
-            icon: 'document-text',
-            icon_color: '#7C3AED',
-            unread: true,
-          });
-        }
+          .like('phone', `%${recipientPhone}`)
+          .neq('id', req.user.id);
+        (byPhoneSuffix ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      }
+    }
+    if (recipientEmail) {
+      const { data: byEmail } = await this.getClient()
+        .from('profiles')
+        .select('id')
+        .ilike('email', recipientEmail)
+        .neq('id', req.user.id);
+      (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+    }
+    for (const receiverId of receiverIds) {
+      try {
+        await this.getClient().from('messages').insert({
+          user_id: receiverId,
+          title: `New quotation ${resolved.quo_number} from ${senderName}`,
+          description: `${senderName} sent you quotation ${resolved.quo_number} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
+          timestamp: new Date().toISOString(),
+          icon: 'document-text',
+          icon_color: '#7C3AED',
+          unread: true,
+        });
       } catch {
         /* non-fatal */
       }
