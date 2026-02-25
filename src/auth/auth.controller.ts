@@ -41,6 +41,26 @@ export class AuthController {
         await this.supabase.getClient().auth.admin.updateUserById(data.user.id, {
           email_confirm: true,
         });
+        // Upsert profile so My Profile shows create-account data (guarantees data even if trigger fails)
+        const fullName = body.full_name?.trim() || null;
+        const phoneNorm = phone ? phone.replace(/\D/g, '').slice(-10) || null : null;
+        const emailVal = data.user.email?.trim() || null;
+        await this.supabase
+          .getClient()
+          .from('profiles')
+          .upsert(
+            {
+              id: data.user.id,
+              full_name: fullName,
+              email: emailVal,
+              phone: phoneNorm,
+            },
+            { onConflict: 'id' },
+          )
+          .select()
+          .single()
+          .then(() => {})
+          .catch(() => {});
       }
       return { user: data.user, session: data.session };
     } catch (e) {

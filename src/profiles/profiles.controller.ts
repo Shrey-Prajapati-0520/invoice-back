@@ -23,7 +23,12 @@ export class ProfilesController {
   }
 
   @Get('me')
-  async getMe(@Request() req: { user: { id: string; email?: string } }) {
+  async getMe(
+    @Request()
+    req: {
+      user: { id: string; email?: string; user_metadata?: { full_name?: string; phone?: string } };
+    },
+  ) {
     const { data: profile, error } = await this.getClient()
       .from('profiles')
       .select('id, full_name, phone, email, avatar_url, pincode')
@@ -34,10 +39,13 @@ export class ProfilesController {
       throw new BadRequestException(error.message);
     }
 
+    const meta = req.user?.user_metadata ?? {};
+    const metaPhone = meta.phone ? String(meta.phone).replace(/\D/g, '').slice(-10) : null;
+
     return {
       id: req.user.id,
-      full_name: profile?.full_name ?? null,
-      phone: profile?.phone ?? null,
+      full_name: profile?.full_name ?? meta?.full_name ?? null,
+      phone: profile?.phone ?? metaPhone ?? null,
       email: profile?.email ?? req.user.email ?? null,
       avatar_url: profile?.avatar_url ?? null,
       pincode: profile?.pincode ?? null,

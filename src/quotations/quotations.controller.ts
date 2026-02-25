@@ -49,8 +49,10 @@ export class QuotationsController {
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
-    const myPhone = this.normalizePhone((profile as { phone?: string } | null)?.phone);
-    const myEmail = ((profile as { email?: string } | null)?.email ?? req.user.email ?? '')
+    const meta = (req.user as { user_metadata?: { phone?: string } }).user_metadata ?? {};
+    const profilePhone = (profile as { phone?: string } | null)?.phone ?? meta?.phone;
+    const myPhone = this.normalizePhone(profilePhone);
+    const myEmail = ((profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? '')
       .toLowerCase()
       .trim();
 
@@ -151,16 +153,69 @@ export class QuotationsController {
     const { data: fullQuotation } = await this.getClient()
       .from('quotations')
       .select(
-        `
-        *,
+        `*,
         customers (id, name, phone, email),
-        quotation_items (*)
-      `,
+        quotation_items (*)`,
       )
       .eq('id', quotation.id)
       .single();
 
-    return fullQuotation ?? quotation;
+    const resolved = fullQuotation ?? quotation;
+    const customer = resolved?.customers as { name?: string } | null;
+    const customerName = customer?.name ?? 'Customer';
+
+    const { data: senderProfile } = await this.getClient()
+      .from('profiles')
+      .select('full_name')
+      .eq('id', req.user.id)
+      .single();
+    const senderName = (senderProfile as { full_name?: string } | null)?.full_name ?? 'A user';
+
+    // Sender notification
+    try {
+      await this.getClient().from('messages').insert({
+        user_id: req.user.id,
+        title: `Quotation ${resolved.quo_number} sent to ${customerName}`,
+        description: `You sent quotation ${resolved.quo_number} to ${customerName} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
+        timestamp: new Date().toISOString(),
+        icon: 'document-text',
+        icon_color: '#7C3AED',
+        unread: true,
+      });
+    } catch {
+      /* non-fatal */
+    }
+
+    // Receiver in-app notification
+    if (recipientPhone || recipientEmail) {
+      try {
+        const orParts: string[] = [];
+        if (recipientPhone) orParts.push(`phone.eq.${recipientPhone}`);
+        if (recipientEmail) orParts.push(`email.eq.${recipientEmail}`);
+        const { data: receiverProfiles } = await this.getClient()
+          .from('profiles')
+          .select('id')
+          .or(orParts.join(','))
+          .neq('id', req.user.id)
+          .limit(1);
+        const receiverId = (receiverProfiles as { id: string }[] | null)?.[0]?.id;
+        if (receiverId) {
+          await this.getClient().from('messages').insert({
+            user_id: receiverId,
+            title: `New quotation ${resolved.quo_number} from ${senderName}`,
+            description: `${senderName} sent you quotation ${resolved.quo_number} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
+            timestamp: new Date().toISOString(),
+            icon: 'document-text',
+            icon_color: '#7C3AED',
+            unread: true,
+          });
+        }
+      } catch {
+        /* non-fatal */
+      }
+    }
+
+    return resolved;
   }
 
   @Get(':id')
@@ -182,8 +237,10 @@ export class QuotationsController {
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
-    const myPhone = this.normalizePhone((profile as { phone?: string } | null)?.phone);
-    const myEmail = ((profile as { email?: string } | null)?.email ?? req.user.email ?? '')
+    const meta = (req.user as { user_metadata?: { phone?: string } }).user_metadata ?? {};
+    const profilePhone = (profile as { phone?: string } | null)?.phone ?? meta?.phone;
+    const myPhone = this.normalizePhone(profilePhone);
+    const myEmail = ((profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? '')
       .toLowerCase()
       .trim();
     const rPhone = this.normalizePhone(q.recipient_phone);

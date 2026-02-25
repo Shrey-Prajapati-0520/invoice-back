@@ -55,8 +55,10 @@ export class InvoicesController {
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
-    const myPhone = this.normalizePhone((profile as { phone?: string } | null)?.phone);
-    const myEmail = ((profile as { email?: string } | null)?.email ?? req.user.email ?? '')
+    const meta = (req.user as { user_metadata?: { phone?: string } }).user_metadata ?? {};
+    const profilePhone = (profile as { phone?: string } | null)?.phone ?? meta?.phone;
+    const myPhone = this.normalizePhone(profilePhone);
+    const myEmail = ((profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? '')
       .toLowerCase()
       .trim();
 
@@ -169,6 +171,20 @@ export class InvoicesController {
     const customerName = customer?.name ?? 'Customer';
     const customerEmail = customer?.email?.trim();
 
+    const items = resolved?.invoice_items ?? [];
+    const total = items.reduce(
+      (sum: number, it: { qty?: number; rate?: number }) =>
+        sum + (Number(it.qty) || 0) * (Number(it.rate) || 0),
+      0,
+    );
+    const amountStr = total > 0 ? `₹${total.toLocaleString('en-IN')}` : undefined;
+    const { data: senderProfile } = await this.getClient()
+      .from('profiles')
+      .select('full_name')
+      .eq('id', req.user.id)
+      .single();
+    const senderName = (senderProfile as { full_name?: string } | null)?.full_name ?? 'A user';
+
     // Sender notification: insert into messages for the creator
     try {
       await this.getClient().from('messages').insert({
@@ -181,28 +197,44 @@ export class InvoicesController {
         unread: true,
       });
     } catch {
-      // Non-fatal; invoice was created successfully
+      /* non-fatal */
     }
 
-    // Receiver notification: send email to customer if they have an email
+    // Receiver in-app notification: find user by recipient phone/email and insert message
+    if (recipientPhone || recipientEmail) {
+      try {
+        const orParts: string[] = [];
+        if (recipientPhone) orParts.push(`phone.eq.${recipientPhone}`);
+        if (recipientEmail) orParts.push(`email.eq.${recipientEmail}`);
+        const { data: receiverProfiles } = await this.getClient()
+          .from('profiles')
+          .select('id')
+          .or(orParts.join(','))
+          .neq('id', req.user.id)
+          .limit(1);
+        const receiverId = (receiverProfiles as { id: string }[] | null)?.[0]?.id;
+        if (receiverId) {
+          await this.getClient().from('messages').insert({
+            user_id: receiverId,
+            title: `New invoice ${resolved.number} from ${senderName}`,
+            description: `${senderName} sent you invoice ${resolved.number}${amountStr ? ` for ${amountStr}` : ''}.`,
+            timestamp: new Date().toISOString(),
+            icon: 'document-text',
+            icon_color: '#7C3AED',
+            unread: true,
+          });
+        }
+      } catch {
+        /* non-fatal */
+      }
+    }
+
+    // Receiver email: send email to customer if they have an email
     if (customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
       try {
-        const { data: profile } = await this.getClient()
-          .from('profiles')
-          .select('full_name')
-          .eq('id', req.user.id)
-          .single();
-        const senderName = (profile as { full_name?: string } | null)?.full_name ?? 'InvoiceBill User';
-        const items = resolved?.invoice_items ?? [];
-        const total = items.reduce(
-          (sum: number, it: { qty?: number; rate?: number }) =>
-            sum + (Number(it.qty) || 0) * (Number(it.rate) || 0),
-          0,
-        );
-        const amountStr = total > 0 ? `₹${total.toLocaleString('en-IN')}` : undefined;
         await this.mail.sendInvoiceNotificationToReceiver({
           to: customerEmail,
-          senderName,
+          senderName: senderName,
           invoiceNumber: resolved.number,
           amount: amountStr,
         });
@@ -233,8 +265,10 @@ export class InvoicesController {
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
-    const myPhone = this.normalizePhone((profile as { phone?: string } | null)?.phone);
-    const myEmail = ((profile as { email?: string } | null)?.email ?? req.user.email ?? '')
+    const meta = (req.user as { user_metadata?: { phone?: string } }).user_metadata ?? {};
+    const profilePhone = (profile as { phone?: string } | null)?.phone ?? meta?.phone;
+    const myPhone = this.normalizePhone(profilePhone);
+    const myEmail = ((profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? '')
       .toLowerCase()
       .trim();
     const rPhone = this.normalizePhone(inv.recipient_phone);
