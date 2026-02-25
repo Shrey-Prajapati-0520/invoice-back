@@ -36,7 +36,7 @@ export class AuthController {
         },
       });
       if (error) throw new BadRequestException(error.message);
-      // Auto-confirm email so user can login immediately
+      // Auto-confirm email so user can use app immediately without email verification
       if (data.user) {
         await this.supabase.getClient().auth.admin.updateUserById(data.user.id, {
           email_confirm: true,
@@ -64,7 +64,18 @@ export class AuthController {
           /* non-fatal */
         }
       }
-      return { user: data.user, session: data.session };
+      // signUp returns session: null when email confirmation is enabled; we confirmed above, so sign in to get a session
+      let session = data.session;
+      if (!session?.access_token && data.user) {
+        const signIn = await this.supabase.getClient().auth.signInWithPassword({
+          email,
+          password: body.password,
+        });
+        if (!signIn.error && signIn.data?.session) {
+          session = signIn.data.session;
+        }
+      }
+      return { user: data.user, session };
     } catch (e) {
       if (e instanceof BadRequestException) throw e;
       const msg = e instanceof Error ? e.message : 'Registration failed. Please try again.';
