@@ -117,6 +117,11 @@ export class InvoicesController {
         const raw = (cust as { phone?: string; email?: string }).phone?.trim?.();
         recipientPhone = raw ? raw.replace(/\D/g, '').slice(-10) || null : null;
         recipientEmail = (cust as { email?: string }).email?.toLowerCase?.()?.trim() || null;
+        if (!recipientPhone && !recipientEmail) {
+          throw new BadRequestException(
+            'Customer must have a phone number or email so the recipient can see this invoice when they sign up.',
+          );
+        }
       }
     }
     const invoicePayload = {

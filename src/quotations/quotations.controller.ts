@@ -111,6 +111,11 @@ export class QuotationsController {
         const raw = (cust as { phone?: string }).phone?.trim?.();
         recipientPhone = raw ? raw.replace(/\D/g, '').slice(-10) || null : null;
         recipientEmail = (cust as { email?: string }).email?.toLowerCase?.()?.trim() || null;
+        if (!recipientPhone && !recipientEmail) {
+          throw new BadRequestException(
+            'Customer must have a phone number or email so the recipient can see this quotation when they sign up.',
+          );
+        }
       }
     }
     const payload = {
