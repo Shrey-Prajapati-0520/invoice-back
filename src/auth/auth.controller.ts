@@ -45,22 +45,24 @@ export class AuthController {
         const fullName = body.full_name?.trim() || null;
         const phoneNorm = phone ? phone.replace(/\D/g, '').slice(-10) || null : null;
         const emailVal = data.user.email?.trim() || null;
-        await this.supabase
-          .getClient()
-          .from('profiles')
-          .upsert(
-            {
-              id: data.user.id,
-              full_name: fullName,
-              email: emailVal,
-              phone: phoneNorm,
-            },
-            { onConflict: 'id' },
-          )
-          .select()
-          .single()
-          .then(() => {})
-          .catch(() => {});
+        try {
+          await this.supabase
+            .getClient()
+            .from('profiles')
+            .upsert(
+              {
+                id: data.user.id,
+                full_name: fullName,
+                email: emailVal,
+                phone: phoneNorm,
+              },
+              { onConflict: 'id' },
+            )
+            .select()
+            .single();
+        } catch {
+          /* non-fatal */
+        }
       }
       return { user: data.user, session: data.session };
     } catch (e) {
@@ -82,7 +84,7 @@ export class AuthController {
         .auth.signInWithPassword({ email, password: body.password });
       if (error?.message?.toLowerCase().includes('email not confirmed')) {
         const { data: users } = await this.supabase.getClient().auth.admin.listUsers({ perPage: 1000 });
-        const user = users?.users?.find((u) => u.email?.toLowerCase() === email);
+        const user = users?.users?.find((u: { email?: string }) => u.email?.toLowerCase() === email);
         if (user) {
           await this.supabase.getClient().auth.admin.updateUserById(user.id, { email_confirm: true });
           const retry = await this.supabase.getClient().auth.signInWithPassword({ email, password: body.password });

@@ -171,8 +171,8 @@ export class InvoicesController {
     const customerName = customer?.name ?? 'Customer';
     const customerEmail = customer?.email?.trim();
 
-    const items = resolved?.invoice_items ?? [];
-    const total = items.reduce(
+    const invoiceItems = resolved?.invoice_items ?? [];
+    const total = invoiceItems.reduce(
       (sum: number, it: { qty?: number; rate?: number }) =>
         sum + (Number(it.qty) || 0) * (Number(it.rate) || 0),
       0,
