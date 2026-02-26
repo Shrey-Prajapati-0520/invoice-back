@@ -78,7 +78,7 @@ export class InvoicesController {
         .from('invoices')
         .select(`*, customers (id, name, phone, email)`)
         .neq('user_id', req.user.id)
-        .eq('recipient_email', myEmail)
+        .ilike('recipient_email', myEmail)
         .order('created_at', { ascending: false });
       (byEmail ?? []).forEach((inv: Record<string, unknown>) => receivedById.set(String(inv.id), { ...inv, type: 'received' }));
     }

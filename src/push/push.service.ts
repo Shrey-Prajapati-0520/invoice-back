@@ -25,7 +25,7 @@ export class PushService {
   }
 
   private isExpoPushToken(token: string): boolean {
-    return /^ExponentPushToken\[.+\]$/.test(token);
+    return /^(ExponentPushToken|ExpoPushToken)\[.+\]$/.test(token);
   }
 
   async send(to: string, title: string, body: string, data?: Record<string, unknown>): Promise<void> {
