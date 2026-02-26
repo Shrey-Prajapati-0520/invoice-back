@@ -42,6 +42,19 @@ export class ProfilesController {
     const meta = req.user?.user_metadata ?? {};
     const metaPhone = meta.phone ? String(meta.phone).replace(/\D/g, '').slice(-10) : null;
 
+    // Sync phone from auth to profile so User B can be found when receiving invoices/quotations
+    const storedPhone = (profile as { phone?: string } | null)?.phone;
+    if (!storedPhone && metaPhone && metaPhone.length >= 10) {
+      try {
+        await this.getClient()
+          .from('profiles')
+          .update({ phone: metaPhone })
+          .eq('id', req.user.id);
+      } catch {
+        /* non-fatal */
+      }
+    }
+
     return {
       id: req.user.id,
       full_name: profile?.full_name ?? meta?.full_name ?? null,

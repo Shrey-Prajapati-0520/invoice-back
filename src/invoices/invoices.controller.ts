@@ -249,18 +249,27 @@ export class InvoicesController {
         const { data: byPhoneRpc } = await this.getClient()
           .rpc('find_receiver_ids_by_phone', { phone_10: recipientPhone, exclude_id: req.user.id });
         if (Array.isArray(byPhoneRpc)) {
-          byPhoneRpc.forEach((r: { id?: string }) => r?.id && receiverIds.add(r.id));
+          byPhoneRpc.forEach((r: { id?: string }) => r?.id && receiverIds.add(String(r.id)));
         }
       } catch {
         /* RPC may not exist; fall through to direct query */
       }
       if (receiverIds.size === 0) {
-        const { data: byPhone } = await this.getClient()
-          .from('profiles')
-          .select('id')
-          .or(`phone.eq.${recipientPhone},phone.like.%${recipientPhone}`)
-          .neq('id', req.user.id);
-        (byPhone ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+        const [exact, suffix] = await Promise.all([
+          this.getClient()
+            .from('profiles')
+            .select('id')
+            .eq('phone', recipientPhone)
+            .neq('id', req.user.id),
+          this.getClient()
+            .from('profiles')
+            .select('id')
+            .neq('id', req.user.id)
+            .ilike('phone', `%${recipientPhone}`),
+        ]);
+        [...(exact.data ?? []), ...(suffix.data ?? [])].forEach((p: { id: string }) =>
+          receiverIds.add(String(p.id)),
+        );
       }
     }
     if (recipientEmail) {
