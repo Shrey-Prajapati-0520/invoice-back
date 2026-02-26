@@ -12,6 +12,12 @@ import {
 import { SupabaseService } from '../supabase.service';
 import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
+import {
+  normalizePhone,
+  normalizeEmail,
+  phoneForStorage,
+  emailForStorage,
+} from '../recipient.util';
 
 interface QuotationItemDto {
   name: string;
@@ -32,11 +38,6 @@ export class QuotationsController {
     return this.supabase.getClient();
   }
 
-  private normalizePhone(phone: string | null | undefined): string {
-    if (!phone) return '';
-    return String(phone).replace(/\D/g, '').slice(-10);
-  }
-
   @Get()
   async list(@Request() req: { user: { id: string; email?: string } }) {
     const client = this.getClient();
@@ -48,16 +49,44 @@ export class QuotationsController {
     if (sentErr) throw new BadRequestException(sentErr.message);
     const sent = sentData ?? [];
 
-    const { data: profile } = await client
+    let { data: profile } = await client
       .from('profiles')
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
     const meta = (req.user as { user_metadata?: { phone?: string; email?: string } }).user_metadata ?? {};
-    const profilePhone = (profile as { phone?: string } | null)?.phone ?? meta?.phone;
-    const myPhone = this.normalizePhone(profilePhone);
-    const profileEmail = (profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? meta?.email ?? '';
-    const myEmail = String(profileEmail).toLowerCase().trim();
+    const authEmail = (req.user as { email?: string }).email;
+    const metaPhone = meta?.phone;
+    const metaEmail = meta?.email ?? authEmail;
+
+    // Sync profile if missing phone/email from user_metadata (ensures User B can receive)
+    const storedPhone = (profile as { phone?: string } | null)?.phone;
+    const storedEmail = (profile as { email?: string } | null)?.email;
+    const needsPhoneSync = !storedPhone && metaPhone && normalizePhone(metaPhone).length >= 10;
+    const needsEmailSync = !storedEmail && (metaEmail || authEmail);
+    if (needsPhoneSync || needsEmailSync) {
+      const updates: Record<string, string | null> = {};
+      if (needsPhoneSync) updates.phone = normalizePhone(metaPhone);
+      if (needsEmailSync) updates.email = normalizeEmail(metaEmail || authEmail) || null;
+      if (Object.keys(updates).length > 0) {
+        try {
+          const { data: synced } = await client
+            .from('profiles')
+            .update(updates)
+            .eq('id', req.user.id)
+            .select('phone, email')
+            .single();
+          if (synced) profile = synced as typeof profile;
+        } catch {
+          /* non-fatal */
+        }
+      }
+    }
+
+    const profilePhone = (profile as { phone?: string } | null)?.phone ?? metaPhone;
+    const myPhone = normalizePhone(profilePhone);
+    const profileEmail = (profile as { email?: string } | null)?.email ?? authEmail ?? metaEmail ?? '';
+    const myEmail = normalizeEmail(profileEmail);
 
     const receivedById = new Map<string, Record<string, unknown>>();
     if (myPhone) {
@@ -65,7 +94,7 @@ export class QuotationsController {
         .from('quotations')
         .select(`*, customers (id, name, phone, email)`)
         .neq('user_id', req.user.id)
-        .eq('recipient_phone', myPhone)
+        .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${myPhone}`)
         .order('created_at', { ascending: false });
       (byPhone ?? []).forEach((quo: Record<string, unknown>) => receivedById.set(String(quo.id), { ...quo, type: 'received' }));
     }
@@ -115,15 +144,18 @@ export class QuotationsController {
         .eq('user_id', req.user.id)
         .single();
       if (cust) {
-        const raw = (cust as { phone?: string }).phone?.trim?.();
-        recipientPhone = raw ? raw.replace(/\D/g, '').slice(-10) || null : null;
-        recipientEmail = (cust as { email?: string }).email?.toLowerCase?.()?.trim() || null;
-        if (!recipientPhone && !recipientEmail) {
-          throw new BadRequestException(
-            'Customer must have a phone number or email so the recipient can see this quotation when they sign up.',
-          );
-        }
+        recipientPhone = phoneForStorage((cust as { phone?: string }).phone);
+        recipientEmail = emailForStorage((cust as { email?: string }).email);
       }
+    }
+    const manualPhone = phoneForStorage((body as { recipient_phone?: string }).recipient_phone);
+    const manualEmail = emailForStorage((body as { recipient_email?: string }).recipient_email);
+    if (manualPhone) recipientPhone = manualPhone;
+    if (manualEmail) recipientEmail = manualEmail;
+    if (!recipientPhone && !recipientEmail) {
+      throw new BadRequestException(
+        'Customer must have a phone or email, or provide recipient_phone/recipient_email, so the recipient can see this quotation when they sign up.',
+      );
     }
     const payload = {
       user_id: req.user.id,
@@ -198,22 +230,25 @@ export class QuotationsController {
       /* non-fatal */
     }
 
-    // Receiver in-app notification
+    // Receiver in-app notification: find User B by recipient phone/email
     const receiverIds = new Set<string>();
     if (recipientPhone) {
-      const { data: byPhone } = await this.getClient()
-        .from('profiles')
-        .select('id')
-        .eq('phone', recipientPhone)
-        .neq('id', req.user.id);
-      (byPhone ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      try {
+        const { data: byPhoneRpc } = await this.getClient()
+          .rpc('find_receiver_ids_by_phone', { phone_10: recipientPhone, exclude_id: req.user.id });
+        if (Array.isArray(byPhoneRpc)) {
+          byPhoneRpc.forEach((r: { id?: string }) => r?.id && receiverIds.add(r.id));
+        }
+      } catch {
+        /* RPC may not exist; fall through */
+      }
       if (receiverIds.size === 0) {
-        const { data: byPhoneSuffix } = await this.getClient()
+        const { data: byPhone } = await this.getClient()
           .from('profiles')
           .select('id')
-          .like('phone', `%${recipientPhone}`)
+          .or(`phone.eq.${recipientPhone},phone.like.%${recipientPhone}`)
           .neq('id', req.user.id);
-        (byPhoneSuffix ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+        (byPhone ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
       }
     }
     if (recipientEmail) {
@@ -240,8 +275,9 @@ export class QuotationsController {
       }
     }
 
-    // Push notifications: sender and receivers
-    const pushRecipients: Array<{ token: string; title: string; body: string }> = [];
+    // Push notifications: sender and receiver (native device notifications for both)
+    const pushData = { type: 'quotation', id: resolved.id };
+    const pushRecipients: Array<{ token: string; title: string; body: string; data?: Record<string, unknown> }> = [];
     const { data: senderTokenRow } = await this.getClient()
       .from('profiles')
       .select('expo_push_token')
@@ -253,6 +289,7 @@ export class QuotationsController {
         token: senderToken,
         title: `Quotation ${resolved.quo_number} sent`,
         body: `You sent quotation ${resolved.quo_number} to ${customerName}.`,
+        data: pushData,
       });
     }
     for (const receiverId of receiverIds) {
@@ -267,6 +304,7 @@ export class QuotationsController {
           token: receiverToken,
           title: `New quotation from ${senderName}`,
           body: `${senderName} sent you quotation ${resolved.quo_number} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
+          data: pushData,
         });
       }
     }
@@ -298,12 +336,12 @@ export class QuotationsController {
       .single();
     const meta = (req.user as { user_metadata?: { phone?: string } }).user_metadata ?? {};
     const profilePhone = (profile as { phone?: string } | null)?.phone ?? meta?.phone;
-    const myPhone = this.normalizePhone(profilePhone);
-    const myEmail = ((profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? '')
-      .toLowerCase()
-      .trim();
-    const rPhone = this.normalizePhone(q.recipient_phone);
-    const rEmail = (q.recipient_email ?? '').toLowerCase().trim();
+    const myPhone = normalizePhone(profilePhone);
+    const myEmail = normalizeEmail(
+      (profile as { email?: string } | null)?.email ?? (req.user as { email?: string }).email ?? '',
+    );
+    const rPhone = normalizePhone(q.recipient_phone);
+    const rEmail = normalizeEmail(q.recipient_email);
     const isRecipient =
       (myPhone && rPhone && myPhone === rPhone) || (myEmail && rEmail && myEmail === rEmail);
     if (!isRecipient) throw new NotFoundException('Quotation not found');
