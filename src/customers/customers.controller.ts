@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { phoneForStorage, emailForStorage } from '../recipient.util';
 
 @Controller('customers')
 @UseGuards(AuthGuard)
@@ -42,11 +43,13 @@ export class CustomersController {
     if (!body?.name?.trim()) {
       throw new BadRequestException('Name is required');
     }
+    const phoneNorm = phoneForStorage(body.phone) || body.phone?.trim() || null;
+    const emailNorm = emailForStorage(body.email) || body.email?.trim() || null;
     const payload = {
       user_id: req.user.id,
       name: body.name.trim(),
-      phone: body.phone?.trim() || null,
-      email: body.email?.trim() || null,
+      phone: phoneNorm,
+      email: emailNorm,
       initials: body.initials?.trim() || null,
       color: body.color || 'blue',
     };
@@ -80,9 +83,16 @@ export class CustomersController {
     @Param('id') id: string,
     @Body() body: Partial<{ name: string; phone: string; email: string; initials: string; color: string }>,
   ) {
+    const updates: Record<string, unknown> = { ...body };
+    if (body.phone !== undefined) {
+      updates.phone = phoneForStorage(body.phone) || body.phone?.trim() || null;
+    }
+    if (body.email !== undefined) {
+      updates.email = emailForStorage(body.email) || body.email?.trim() || null;
+    }
     const { data, error } = await this.getClient()
       .from('customers')
-      .update(body)
+      .update(updates)
       .eq('id', id)
       .eq('user_id', req.user.id)
       .select()

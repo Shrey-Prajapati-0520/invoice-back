@@ -92,7 +92,7 @@ export class ProfilesController {
       return data;
     }
 
-    const { data, error } = await this.getClient()
+    let { data, error } = await this.getClient()
       .from('profiles')
       .update(updates)
       .eq('id', req.user.id)
@@ -100,6 +100,21 @@ export class ProfilesController {
       .single();
 
     if (error) throw new BadRequestException(error.message);
+    if (!data && body.expo_push_token !== undefined) {
+      try {
+        const { data: upserted } = await this.getClient()
+          .from('profiles')
+          .upsert(
+            { id: req.user.id, expo_push_token: body.expo_push_token?.trim() || null },
+            { onConflict: 'id' },
+          )
+          .select()
+          .single();
+        data = upserted;
+      } catch {
+        /* non-fatal fallback */
+      }
+    }
     return data;
   }
 
