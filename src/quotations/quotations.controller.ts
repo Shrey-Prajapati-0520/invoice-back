@@ -54,7 +54,7 @@ export class QuotationsController {
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
-    const meta = (req.user as { user_metadata?: { phone?: string; email?: string } }).user_metadata ?? {};
+    const meta = (req.user as { user_metadata?: { phone?: string; email?: string; full_name?: string } }).user_metadata ?? {};
     const authEmail = (req.user as { email?: string }).email;
     const authPhone = (req.user as { phone?: string }).phone;
     const metaPhone = meta?.phone ?? authPhone;
