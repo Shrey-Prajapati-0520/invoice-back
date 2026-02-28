@@ -75,7 +75,19 @@ export class ProfilesController {
     if (body.full_name !== undefined) updates.full_name = body.full_name?.trim() || null;
     if (body.phone !== undefined) {
       const digits = body.phone?.trim()?.replace(/\D/g, '') || '';
-      updates.phone = digits.length >= 10 ? digits.slice(-10) : null;
+      const newPhone = digits.length >= 10 ? digits.slice(-10) : null;
+      if (newPhone) {
+        const { data: existing } = await this.getClient()
+          .from('profiles')
+          .select('id')
+          .eq('phone', newPhone)
+          .neq('id', req.user.id)
+          .maybeSingle();
+        if (existing) {
+          throw new BadRequestException('This phone number is already registered to another account.');
+        }
+      }
+      updates.phone = newPhone;
     }
     if (body.email !== undefined) updates.email = body.email?.trim() || null;
     if (body.pincode !== undefined) updates.pincode = body.pincode?.trim() || null;

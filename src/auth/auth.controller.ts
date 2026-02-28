@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
+import { phoneForStorage } from '../recipient.util';
 
 @Controller('auth')
 export class AuthController {
@@ -21,9 +22,22 @@ export class AuthController {
       throw new BadRequestException('Password must be at least 6 characters');
     }
     const phone = body?.phone?.trim?.().replace(/\D/g, '') || undefined;
-    if (phone && (phone.length < 10 || !/^[6-9]\d{9}$/.test(phone))) {
+    if (!phone || phone.length < 10 || !/^[6-9]\d{9}$/.test(phone.slice(-10))) {
       throw new BadRequestException('Please enter a valid 10-digit Indian mobile number');
     }
+    const phoneNorm = phoneForStorage(phone) || phone.replace(/\D/g, '').slice(-10);
+
+    // One phone = one account: reject if phone already registered
+    const { data: existingProfile } = await this.supabase
+      .getClient()
+      .from('profiles')
+      .select('id')
+      .eq('phone', phoneNorm)
+      .maybeSingle();
+    if (existingProfile) {
+      throw new BadRequestException('This phone number is already registered. Each number can only be used for one account.');
+    }
+
     try {
       const { data, error } = await this.supabase.getClient().auth.signUp({
         email,

@@ -43,8 +43,9 @@ export class CustomersController {
     if (!body?.name?.trim()) {
       throw new BadRequestException('Name is required');
     }
-    const phoneNorm = phoneForStorage(body.phone) || body.phone?.trim() || null;
-    const emailNorm = emailForStorage(body.email) || body.email?.trim() || null;
+    // Store only normalized phone (10 digits) so recipient matching works reliably
+    const phoneNorm = phoneForStorage(body.phone) ?? null;
+    const emailNorm = emailForStorage(body.email) ?? null;
     const payload = {
       user_id: req.user.id,
       name: body.name.trim(),
@@ -85,7 +86,7 @@ export class CustomersController {
   ) {
     const updates: Record<string, unknown> = { ...body };
     if (body.phone !== undefined) {
-      updates.phone = phoneForStorage(body.phone) || body.phone?.trim() || null;
+      updates.phone = phoneForStorage(body.phone) ?? null;
     }
     if (body.email !== undefined) {
       updates.email = emailForStorage(body.email) || body.email?.trim() || null;

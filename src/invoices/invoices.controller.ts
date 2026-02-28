@@ -255,6 +255,7 @@ export class InvoicesController {
         /* RPC may not exist; fall through to direct query */
       }
       if (receiverIds.size === 0) {
+        // Fallback: exact match (10 digits) or suffix match (handles +91xxx, etc.)
         const [exact, suffix] = await Promise.all([
           this.getClient()
             .from('profiles')
