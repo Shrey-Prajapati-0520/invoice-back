@@ -49,15 +49,40 @@ export class QuotationsController {
     if (sentErr) throw new BadRequestException(sentErr.message);
     const sent = sentData ?? [];
 
-    let { data: profile } = await client
+    let { data: profile, error: profileErr } = await client
       .from('profiles')
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
     const meta = (req.user as { user_metadata?: { phone?: string; email?: string } }).user_metadata ?? {};
     const authEmail = (req.user as { email?: string }).email;
-    const metaPhone = meta?.phone;
+    const authPhone = (req.user as { phone?: string }).phone;
+    const metaPhone = meta?.phone ?? authPhone;
     const metaEmail = meta?.email ?? authEmail;
+
+    // Ensure profile exists (handles race where handle_new_user hasn't run)
+    if (!profile && profileErr?.code === 'PGRST116') {
+      const initPhone = metaPhone && normalizePhone(metaPhone).length >= 10 ? normalizePhone(metaPhone) : null;
+      const initEmail = metaEmail || authEmail ? normalizeEmail(metaEmail || authEmail) : null;
+      try {
+        const { data: inserted } = await client
+          .from('profiles')
+          .upsert(
+            {
+              id: req.user.id,
+              full_name: meta?.full_name ?? null,
+              email: initEmail,
+              phone: initPhone,
+            },
+            { onConflict: 'id' },
+          )
+          .select('phone, email')
+          .single();
+        if (inserted) profile = inserted;
+      } catch {
+        /* non-fatal; continue with auth metadata */
+      }
+    }
 
     // Sync profile if missing phone/email from user_metadata (ensures User B can receive)
     const storedPhone = (profile as { phone?: string } | null)?.phone;
@@ -83,10 +108,12 @@ export class QuotationsController {
       }
     }
 
-    const profilePhone = (profile as { phone?: string } | null)?.phone ?? metaPhone;
-    const myPhone = normalizePhone(profilePhone);
-    const profileEmail = (profile as { email?: string } | null)?.email ?? authEmail ?? metaEmail ?? '';
-    const myEmail = normalizeEmail(profileEmail);
+    // Prefer auth identity first (always in JWT) – ensures "receiver comes after" works when
+    // profile is empty or not yet synced; profile can be stale on first request after cold start.
+    const profilePhone = (profile as { phone?: string } | null)?.phone;
+    const profileEmail = (profile as { email?: string } | null)?.email;
+    const myPhone = normalizePhone(metaPhone || authPhone || profilePhone || '');
+    const myEmail = normalizeEmail(authEmail || metaEmail || profileEmail || '');
 
     const receivedById = new Map<string, Record<string, unknown>>();
     if (myPhone) {

@@ -29,7 +29,7 @@ export class ProfilesController {
       user: { id: string; email?: string; user_metadata?: { full_name?: string; phone?: string } };
     },
   ) {
-    const { data: profile, error } = await this.getClient()
+    let { data: profile, error } = await this.getClient()
       .from('profiles')
       .select('id, full_name, phone, email, avatar_url, pincode')
       .eq('id', req.user.id)
@@ -37,6 +37,31 @@ export class ProfilesController {
 
     if (error && error.code !== 'PGRST116') {
       throw new BadRequestException(error.message);
+    }
+
+    // Ensure profile exists (handles race where handle_new_user hasn't run yet)
+    if (!profile && error?.code === 'PGRST116') {
+      const meta = req.user?.user_metadata ?? {};
+      const initPhone = meta.phone && String(meta.phone).replace(/\D/g, '').length >= 10
+        ? String(meta.phone).replace(/\D/g, '').slice(-10) : null;
+      try {
+        const { data: inserted } = await this.getClient()
+          .from('profiles')
+          .upsert(
+            {
+              id: req.user.id,
+              full_name: meta?.full_name ?? null,
+              email: (req.user as { email?: string }).email ?? null,
+              phone: initPhone,
+            },
+            { onConflict: 'id' },
+          )
+          .select('id, full_name, phone, email, avatar_url, pincode')
+          .single();
+        if (inserted) profile = inserted;
+      } catch {
+        /* non-fatal; continue with merged response */
+      }
     }
 
     const meta = req.user?.user_metadata ?? {};
@@ -111,30 +136,30 @@ export class ProfilesController {
       .select()
       .single();
 
-    if (error) {
-      if (body.expo_push_token !== undefined) {
-        console.warn('[Profiles] Update expo_push_token failed:', error.message);
-      }
-      throw new BadRequestException(error.message);
-    }
+    if (error) throw new BadRequestException(error.message);
     if (!data && body.expo_push_token !== undefined) {
       try {
-        const { data: upserted, error: upsertErr } = await this.getClient()
+        const meta = (req as { user?: { user_metadata?: { full_name?: string; phone?: string }; email?: string } }).user?.user_metadata ?? {};
+        const initPhone = meta.phone && String(meta.phone).replace(/\D/g, '').length >= 10
+          ? String(meta.phone).replace(/\D/g, '').slice(-10) : null;
+        const { data: upserted } = await this.getClient()
           .from('profiles')
           .upsert(
-            { id: req.user.id, expo_push_token: body.expo_push_token?.trim() || null },
+            {
+              id: req.user.id,
+              full_name: meta?.full_name ?? null,
+              email: (req.user as { email?: string }).email ?? null,
+              phone: initPhone,
+              expo_push_token: body.expo_push_token?.trim() || null,
+            },
             { onConflict: 'id' },
           )
           .select()
           .single();
-        if (upsertErr) console.warn('[Profiles] Upsert expo_push_token failed:', upsertErr.message);
         data = upserted;
-      } catch (e) {
-        console.warn('[Profiles] Upsert expo_push_token error:', e);
+      } catch {
+        /* non-fatal fallback */
       }
-    }
-    if (body.expo_push_token !== undefined && data && (data as { expo_push_token?: string }).expo_push_token) {
-      console.log('[Profiles] expo_push_token saved for user', req.user.id.slice(0, 8) + '...');
     }
     return data;
   }
