@@ -53,7 +53,13 @@ export class PushService {
     const messages = recipients
       .filter((r) => r.token && this.isExpoPushToken(r.token))
       .map((r) => ({ to: r.token, title: r.title, body: r.body, sound: 'default' as const, data: r.data }));
-    if (messages.length === 0) return;
+    if (messages.length === 0) {
+      const withToken = recipients.filter((r) => r.token).length;
+      if (withToken > 0) console.warn('[Push] No valid Expo tokens in recipients (check token format)');
+      return;
+    }
+    const hasAccessToken = !!this.config.get<string>('EXPO_ACCESS_TOKEN');
+    if (!hasAccessToken) console.warn('[Push] EXPO_ACCESS_TOKEN not set; push may be rate-limited');
 
     const chunks = client.chunkPushNotifications(messages);
     for (const chunk of chunks) {

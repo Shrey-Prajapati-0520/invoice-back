@@ -111,10 +111,15 @@ export class ProfilesController {
       .select()
       .single();
 
-    if (error) throw new BadRequestException(error.message);
+    if (error) {
+      if (body.expo_push_token !== undefined) {
+        console.warn('[Profiles] Update expo_push_token failed:', error.message);
+      }
+      throw new BadRequestException(error.message);
+    }
     if (!data && body.expo_push_token !== undefined) {
       try {
-        const { data: upserted } = await this.getClient()
+        const { data: upserted, error: upsertErr } = await this.getClient()
           .from('profiles')
           .upsert(
             { id: req.user.id, expo_push_token: body.expo_push_token?.trim() || null },
@@ -122,10 +127,14 @@ export class ProfilesController {
           )
           .select()
           .single();
+        if (upsertErr) console.warn('[Profiles] Upsert expo_push_token failed:', upsertErr.message);
         data = upserted;
-      } catch {
-        /* non-fatal fallback */
+      } catch (e) {
+        console.warn('[Profiles] Upsert expo_push_token error:', e);
       }
+    }
+    if (body.expo_push_token !== undefined && data && (data as { expo_push_token?: string }).expo_push_token) {
+      console.log('[Profiles] expo_push_token saved for user', req.user.id.slice(0, 8) + '...');
     }
     return data;
   }
