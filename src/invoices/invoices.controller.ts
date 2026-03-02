@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { MailService } from '../mail/mail.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
 import {
@@ -35,6 +36,7 @@ export class InvoicesController {
   constructor(
     private supabase: SupabaseService,
     private mail: MailService,
+    private notifications: NotificationsService,
     private push: PushService,
   ) {}
 
@@ -250,12 +252,29 @@ export class InvoicesController {
     const amountStr = total > 0 ? `₹${total.toLocaleString('en-IN')}` : undefined;
     const { data: senderProfile } = await this.getClient()
       .from('profiles')
-      .select('full_name')
+      .select('full_name, phone')
       .eq('id', req.user.id)
       .single();
     const senderName = (senderProfile as { full_name?: string } | null)?.full_name ?? 'A user';
+    const senderPhone = (senderProfile as { phone?: string } | null)?.phone
+      ? normalizePhone((senderProfile as { phone?: string }).phone)
+      : null;
 
-    // Sender notification: insert into messages for the creator
+    // Sender notification (notifications table – deep link support)
+    try {
+      await this.notifications.create({
+        user_id: req.user.id,
+        user_phone: senderPhone,
+        title: `Invoice ${resolved.number} sent to ${customerName}`,
+        body: `You sent invoice ${resolved.number} to ${customerName}.`,
+        type: 'invoice',
+        reference_id: resolved.id,
+        deep_link_screen: 'invoices',
+      });
+    } catch {
+      /* non-fatal */
+    }
+    // Legacy messages (backward compat)
     try {
       await this.getClient().from('messages').insert({
         user_id: req.user.id,
@@ -309,7 +328,31 @@ export class InvoicesController {
         .neq('id', req.user.id);
       (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
     }
+    // Fetch receiver phones for notifications
+    const receiverPhones = new Map<string, string>();
+    if (receiverIds.size > 0) {
+      const { data: profiles } = await this.getClient()
+        .from('profiles')
+        .select('id, phone')
+        .in('id', Array.from(receiverIds));
+      (profiles ?? []).forEach((p: { id: string; phone?: string }) => {
+        if (p.phone) receiverPhones.set(p.id, normalizePhone(p.phone));
+      });
+    }
     for (const receiverId of receiverIds) {
+      try {
+        await this.notifications.create({
+          user_id: receiverId,
+          user_phone: receiverPhones.get(receiverId) || null,
+          title: `New invoice ${resolved.number} from ${senderName}`,
+          body: `${senderName} sent you invoice ${resolved.number}${amountStr ? ` for ${amountStr}` : ''}.`,
+          type: 'invoice',
+          reference_id: resolved.id,
+          deep_link_screen: 'invoices',
+        });
+      } catch {
+        /* non-fatal */
+      }
       try {
         await this.getClient().from('messages').insert({
           user_id: receiverId,
@@ -339,33 +382,23 @@ export class InvoicesController {
       }
     }
 
-    // Push notifications: sender and receiver (native device notifications for both)
+    // Push notifications: sender and receiver (supports multiple devices per user)
     const pushData = { type: 'invoice', id: resolved.id };
     const pushRecipients: Array<{ token: string; title: string; body: string; data?: Record<string, unknown> }> = [];
-    const { data: senderTokenRow } = await this.getClient()
-      .from('profiles')
-      .select('expo_push_token')
-      .eq('id', req.user.id)
-      .single();
-    const senderToken = (senderTokenRow as { expo_push_token?: string } | null)?.expo_push_token;
-    if (senderToken) {
+    const senderTokens = await this.push.getTokensForUser(req.user.id);
+    for (const token of senderTokens) {
       pushRecipients.push({
-        token: senderToken,
+        token,
         title: `Invoice ${resolved.number} sent`,
         body: `You sent invoice ${resolved.number} to ${customerName}.`,
         data: pushData,
       });
     }
     for (const receiverId of receiverIds) {
-      const { data: receiverTokenRow } = await this.getClient()
-        .from('profiles')
-        .select('expo_push_token')
-        .eq('id', receiverId)
-        .single();
-      const receiverToken = (receiverTokenRow as { expo_push_token?: string } | null)?.expo_push_token;
-      if (receiverToken) {
+      const receiverTokens = await this.push.getTokensForUser(receiverId);
+      for (const token of receiverTokens) {
         pushRecipients.push({
-          token: receiverToken,
+          token,
           title: `New invoice from ${senderName}`,
           body: `${senderName} sent you invoice ${resolved.number}${amountStr ? ` for ${amountStr}` : ''}.`,
           data: pushData,

@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
 import {
@@ -31,6 +32,7 @@ interface QuotationItemDto {
 export class QuotationsController {
   constructor(
     private supabase: SupabaseService,
+    private notifications: NotificationsService,
     private push: PushService,
   ) {}
 
@@ -237,12 +239,28 @@ export class QuotationsController {
 
     const { data: senderProfile } = await this.getClient()
       .from('profiles')
-      .select('full_name')
+      .select('full_name, phone')
       .eq('id', req.user.id)
       .single();
     const senderName = (senderProfile as { full_name?: string } | null)?.full_name ?? 'A user';
+    const senderPhone = (senderProfile as { phone?: string } | null)?.phone
+      ? normalizePhone((senderProfile as { phone?: string }).phone)
+      : null;
 
-    // Sender notification
+    // Sender notification (notifications table – deep link support)
+    try {
+      await this.notifications.create({
+        user_id: req.user.id,
+        user_phone: senderPhone,
+        title: `Quotation ${resolved.quo_number} sent to ${customerName}`,
+        body: `You sent quotation ${resolved.quo_number} to ${customerName}.`,
+        type: 'quotation',
+        reference_id: resolved.id,
+        deep_link_screen: 'quotations',
+      });
+    } catch {
+      /* non-fatal */
+    }
     try {
       await this.getClient().from('messages').insert({
         user_id: req.user.id,
@@ -295,7 +313,30 @@ export class QuotationsController {
         .neq('id', req.user.id);
       (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
     }
+    const receiverPhones = new Map<string, string>();
+    if (receiverIds.size > 0) {
+      const { data: profiles } = await this.getClient()
+        .from('profiles')
+        .select('id, phone')
+        .in('id', Array.from(receiverIds));
+      (profiles ?? []).forEach((p: { id: string; phone?: string }) => {
+        if (p.phone) receiverPhones.set(p.id, normalizePhone(p.phone));
+      });
+    }
     for (const receiverId of receiverIds) {
+      try {
+        await this.notifications.create({
+          user_id: receiverId,
+          user_phone: receiverPhones.get(receiverId) || null,
+          title: `New quotation ${resolved.quo_number} from ${senderName}`,
+          body: `${senderName} sent you quotation ${resolved.quo_number}.`,
+          type: 'quotation',
+          reference_id: resolved.id,
+          deep_link_screen: 'quotations',
+        });
+      } catch {
+        /* non-fatal */
+      }
       try {
         await this.getClient().from('messages').insert({
           user_id: receiverId,
@@ -311,33 +352,23 @@ export class QuotationsController {
       }
     }
 
-    // Push notifications: sender and receiver (native device notifications for both)
+    // Push notifications: sender and receiver (supports multiple devices per user)
     const pushData = { type: 'quotation', id: resolved.id };
     const pushRecipients: Array<{ token: string; title: string; body: string; data?: Record<string, unknown> }> = [];
-    const { data: senderTokenRow } = await this.getClient()
-      .from('profiles')
-      .select('expo_push_token')
-      .eq('id', req.user.id)
-      .single();
-    const senderToken = (senderTokenRow as { expo_push_token?: string } | null)?.expo_push_token;
-    if (senderToken) {
+    const senderTokens = await this.push.getTokensForUser(req.user.id);
+    for (const token of senderTokens) {
       pushRecipients.push({
-        token: senderToken,
+        token,
         title: `Quotation ${resolved.quo_number} sent`,
         body: `You sent quotation ${resolved.quo_number} to ${customerName}.`,
         data: pushData,
       });
     }
     for (const receiverId of receiverIds) {
-      const { data: receiverTokenRow } = await this.getClient()
-        .from('profiles')
-        .select('expo_push_token')
-        .eq('id', receiverId)
-        .single();
-      const receiverToken = (receiverTokenRow as { expo_push_token?: string } | null)?.expo_push_token;
-      if (receiverToken) {
+      const receiverTokens = await this.push.getTokensForUser(receiverId);
+      for (const token of receiverTokens) {
         pushRecipients.push({
-          token: receiverToken,
+          token,
           title: `New quotation from ${senderName}`,
           body: `${senderName} sent you quotation ${resolved.quo_number} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
           data: pushData,
