@@ -12,6 +12,7 @@ import { BankAccountsModule } from './bank-accounts/bank-accounts.module';
 import { BusinessProfilesModule } from './business-profiles/business-profiles.module';
 import { InvoiceSettingsModule } from './invoice-settings/invoice-settings.module';
 import { TermsModule } from './terms/terms.module';
+import { VerificationStatusModule } from './verification-status/verification-status.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { RecurringInvoicesModule } from './recurring-invoices/recurring-invoices.module';
@@ -35,6 +36,7 @@ import { HealthModule } from './health/health.module';
     BusinessProfilesModule,
     InvoiceSettingsModule,
     TermsModule,
+    VerificationStatusModule,
     InvoicesModule,
     QuotationsModule,
     RecurringInvoicesModule,
