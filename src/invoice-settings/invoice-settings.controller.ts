@@ -148,7 +148,7 @@ export class InvoiceSettingsController {
       user_id: req.user.id,
       target: t,
       format_type: body.format_type ?? 'preset',
-      selected_template: body.selected_template ?? null,
+      selected_template: body.selected_template?.trim() || undefined,
       starting_number: body.starting_number ?? '001',
       reset_option: body.reset_option ?? 'never',
       padding: body.padding ?? 3,
