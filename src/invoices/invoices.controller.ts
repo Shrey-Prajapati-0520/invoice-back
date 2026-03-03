@@ -55,7 +55,16 @@ export class InvoicesController {
       .eq('user_id', req.user.id)
       .order('created_at', { ascending: false });
     if (sentErr) throw new BadRequestException(sentErr.message);
-    const sent = sentData ?? [];
+    const withAmount = (inv: Record<string, unknown>) => {
+      const items = (inv.invoice_items ?? []) as { qty?: number; rate?: number }[];
+      const amt = items.reduce(
+        (s: number, i: { qty?: number; rate?: number }) =>
+          s + (Number(i.qty) || 1) * (Number(i.rate) || 0),
+        0,
+      );
+      return { ...inv, type: 'sent', amount: amt };
+    };
+    const sent = (sentData ?? []).map(withAmount);
 
     let { data: profile, error: profileErr } = await client
       .from('profiles')
@@ -131,7 +140,15 @@ export class InvoicesController {
         .neq('user_id', req.user.id)
         .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${myPhone}`)
         .order('created_at', { ascending: false });
-      (byPhone ?? []).forEach((inv: Record<string, unknown>) => receivedById.set(String(inv.id), { ...inv, type: 'received' }));
+      (byPhone ?? []).forEach((inv: Record<string, unknown>) => {
+        const items = (inv.invoice_items ?? []) as { qty?: number; rate?: number }[];
+        const amt = items.reduce(
+          (s: number, i: { qty?: number; rate?: number }) =>
+            s + (Number(i.qty) || 1) * (Number(i.rate) || 0),
+          0,
+        );
+        receivedById.set(String(inv.id), { ...inv, type: 'received', amount: amt });
+      });
     }
     if (myEmail) {
       const { data: byEmail } = await client
@@ -140,7 +157,15 @@ export class InvoicesController {
         .neq('user_id', req.user.id)
         .ilike('recipient_email', myEmail)
         .order('created_at', { ascending: false });
-      (byEmail ?? []).forEach((inv: Record<string, unknown>) => receivedById.set(String(inv.id), { ...inv, type: 'received' }));
+      (byEmail ?? []).forEach((inv: Record<string, unknown>) => {
+        const items = (inv.invoice_items ?? []) as { qty?: number; rate?: number }[];
+        const amt = items.reduce(
+          (s: number, i: { qty?: number; rate?: number }) =>
+            s + (Number(i.qty) || 1) * (Number(i.rate) || 0),
+          0,
+        );
+        receivedById.set(String(inv.id), { ...inv, type: 'received', amount: amt });
+      });
     }
     const received = Array.from(receivedById.values());
 
