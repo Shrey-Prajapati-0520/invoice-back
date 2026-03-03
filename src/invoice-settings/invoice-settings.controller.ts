@@ -68,7 +68,7 @@ export class InvoiceSettingsController {
       .select('*')
       .eq('user_id', req.user.id)
       .eq('target', target)
-      .single();
+      .maybeSingle();
 
     const table = target === 'invoices' ? 'invoices' : 'quotations';
     const numCol = target === 'invoices' ? 'number' : 'quo_number';
