@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { CustomersModule } from './customers/customers.module';
 import { ItemsModule } from './items/items.module';
 import { BankAccountsModule } from './bank-accounts/bank-accounts.module';
+import { BusinessProfilesModule } from './business-profiles/business-profiles.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { RecurringInvoicesModule } from './recurring-invoices/recurring-invoices.module';
@@ -29,6 +30,7 @@ import { HealthModule } from './health/health.module';
     CustomersModule,
     ItemsModule,
     BankAccountsModule,
+    BusinessProfilesModule,
     InvoicesModule,
     QuotationsModule,
     RecurringInvoicesModule,

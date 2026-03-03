@@ -31,6 +31,10 @@ export class BankAccountsController {
     return data ?? [];
   }
 
+  private isValidIFSC(v: string): boolean {
+    return /^[A-Z]{4}0[A-Z0-9]{6}$/.test(v.trim().toUpperCase());
+  }
+
   @Post()
   async create(
     @Request() req: { user: { id: string } },
@@ -50,7 +54,18 @@ export class BankAccountsController {
     if (!body?.ifsc?.trim()) {
       throw new BadRequestException('IFSC code is required');
     }
-    const last4 = body.account_number_last4?.replace(/\D/g, '').slice(-4) || null;
+    const ifscUpper = body.ifsc.trim().toUpperCase();
+    if (!this.isValidIFSC(ifscUpper)) {
+      throw new BadRequestException('Invalid IFSC code. Use 11 characters (e.g. HDFC0001234)');
+    }
+    const rawLast4 = body.account_number_last4?.replace(/\D/g, '') ?? '';
+    if (!rawLast4) {
+      throw new BadRequestException('Account number is required');
+    }
+    const last4 = rawLast4.slice(-4);
+    if (last4.length < 4) {
+      throw new BadRequestException('Account number must be at least 4 digits');
+    }
     const { data, error } = await this.supabase
       .getClient()
       .from('bank_accounts')
@@ -58,7 +73,7 @@ export class BankAccountsController {
         user_id: req.user.id,
         account_holder: body.account_holder.trim(),
         account_number_last4: last4,
-        ifsc: body.ifsc.trim(),
+        ifsc: ifscUpper,
         bank_name: body.bank_name?.trim() || null,
         branch_name: body.branch_name?.trim() || null,
         is_default: body.is_default ?? false,
