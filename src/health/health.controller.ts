@@ -24,6 +24,18 @@ export class HealthController {
       if (error) {
         return { status: 'degraded', db: 'error', message: error.message };
       }
+      // Verify verification_status has pan_number column (required for PAN verification)
+      const { error: vsError } = await client.from('verification_status').select('pan_number, pan_holder_name, gstin_number').limit(1);
+      if (vsError) {
+        const hint = vsError.message?.includes('does not exist') || vsError.message?.includes('pan_number')
+          ? ' Run supabase/verification-status-pan-gstin-columns.sql in Supabase SQL Editor'
+          : '';
+        return {
+          status: 'degraded',
+          db: 'connected',
+          message: `verification_status: ${vsError.message}${hint}`,
+        };
+      }
     } catch (e) {
       return {
         status: 'unhealthy',

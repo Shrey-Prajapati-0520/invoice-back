@@ -54,23 +54,45 @@ export class VerificationStatusController {
     if (!panHolderName || panHolderName.length < 2) {
       throw new BadRequestException('Name on PAN card is required');
     }
-    const payload = {
-      user_id: req.user.id,
+    const userId = req.user.id;
+    const updatePayload = {
       pan: 'verified',
       pan_number: panNumber,
       pan_holder_name: panHolderName,
       pan_verified_at: new Date().toISOString(),
     };
-    const { data, error } = await this.getClient()
+    const client = this.getClient();
+
+    // Try to update existing row first
+    const { data: updated, error: updateError } = await client
       .from('verification_status')
-      .upsert(payload, { onConflict: 'user_id' })
+      .update(updatePayload)
+      .eq('user_id', userId)
+      .select()
+      .maybeSingle();
+
+    if (updateError) {
+      this.logger.warn(`PAN update failed: ${updateError.message} (code: ${updateError.code})`);
+      throw new BadRequestException(updateError.message);
+    }
+    if (updated) return updated;
+
+    // No existing row - insert new one
+    const insertPayload = {
+      user_id: userId,
+      ...updatePayload,
+    };
+    const { data: inserted, error: insertError } = await client
+      .from('verification_status')
+      .insert(insertPayload)
       .select()
       .single();
-    if (error) {
-      this.logger.warn(`PAN upsert failed: ${error.message} (code: ${error.code})`);
-      throw new BadRequestException(error.message);
+
+    if (insertError) {
+      this.logger.warn(`PAN insert failed: ${insertError.message} (code: ${insertError.code})`);
+      throw new BadRequestException(insertError.message);
     }
-    return data;
+    return inserted;
   }
 
   @Post('gstin')
@@ -82,18 +104,35 @@ export class VerificationStatusController {
     if (!this.isValidGSTIN(gstinNumber)) {
       throw new BadRequestException('Invalid GSTIN format. Use 15 characters e.g. 24ABCDE1234F1Z5');
     }
-    const payload = {
-      user_id: req.user.id,
+    const userId = req.user.id;
+    const updatePayload = {
       gstin: 'verified',
       gstin_number: gstinNumber,
       gstin_verified_at: new Date().toISOString(),
     };
-    const { data, error } = await this.getClient()
+    const client = this.getClient();
+
+    const { data: updated, error: updateError } = await client
       .from('verification_status')
-      .upsert(payload, { onConflict: 'user_id' })
+      .update(updatePayload)
+      .eq('user_id', userId)
+      .select()
+      .maybeSingle();
+
+    if (updateError) {
+      throw new BadRequestException(updateError.message);
+    }
+    if (updated) return updated;
+
+    const { data: inserted, error: insertError } = await client
+      .from('verification_status')
+      .insert({ user_id: userId, ...updatePayload })
       .select()
       .single();
-    if (error) throw new BadRequestException(error.message);
-    return data;
+
+    if (insertError) {
+      throw new BadRequestException(insertError.message);
+    }
+    return inserted;
   }
 }
