@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { SupabaseModule } from './supabase.module';
 import { MailModule } from './mail/mail.module';
 import { AuthModule } from './auth/auth.module';
+import { AddressesModule } from './addresses/addresses.module';
 import { CustomersModule } from './customers/customers.module';
 import { ItemsModule } from './items/items.module';
 import { BankAccountsModule } from './bank-accounts/bank-accounts.module';
@@ -30,6 +31,7 @@ import { HealthModule } from './health/health.module';
     SupabaseModule,
     MailModule,
     AuthModule,
+    AddressesModule,
     CustomersModule,
     ItemsModule,
     BankAccountsModule,

@@ -27,7 +27,11 @@ export class VerificationStatusController {
   }
 
   private isValidGSTIN(v: string): boolean {
-    return /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/.test(v?.trim().toUpperCase().replace(/\s/g, '') ?? '');
+    const s = v?.trim().toUpperCase().replace(/\s/g, '') ?? '';
+    if (s.length !== 15) return false;
+    // Standard format or 15 alphanumeric with Z at position 14
+    return /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(s)
+      || (s[13] === 'Z' && /^[A-Z0-9]+$/.test(s));
   }
 
   @Get()
@@ -120,6 +124,7 @@ export class VerificationStatusController {
       .maybeSingle();
 
     if (updateError) {
+      this.logger.warn(`GSTIN update failed: ${updateError.message} (code: ${updateError.code})`);
       throw new BadRequestException(updateError.message);
     }
     if (updated) return updated;
@@ -131,6 +136,7 @@ export class VerificationStatusController {
       .single();
 
     if (insertError) {
+      this.logger.warn(`GSTIN insert failed: ${insertError.message} (code: ${insertError.code})`);
       throw new BadRequestException(insertError.message);
     }
     return inserted;
