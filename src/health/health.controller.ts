@@ -1,0 +1,36 @@
+import { Controller, Get } from '@nestjs/common';
+import { SupabaseService } from '../supabase.service';
+
+/**
+ * Health checks for hosted environments (load balancers, orchestrators).
+ * Stateless – no session or in-memory state required.
+ */
+@Controller('health')
+export class HealthController {
+  constructor(private readonly supabase: SupabaseService) {}
+
+  /** Liveness – process is running. */
+  @Get('live')
+  live() {
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  }
+
+  /** Readiness – can accept traffic (DB reachable). */
+  @Get('ready')
+  async ready() {
+    try {
+      const client = this.supabase.getClient();
+      const { error } = await client.from('profiles').select('id').limit(1);
+      if (error) {
+        return { status: 'degraded', db: 'error', message: error.message };
+      }
+    } catch (e) {
+      return {
+        status: 'unhealthy',
+        db: 'unreachable',
+        message: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+    return { status: 'ok', db: 'connected', timestamp: new Date().toISOString() };
+  }
+}

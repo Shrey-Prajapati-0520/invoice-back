@@ -17,6 +17,7 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { MessagesModule } from './messages/messages.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PushModule } from './push/push.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { PushModule } from './push/push.module';
     MessagesModule,
     NotificationsModule,
     PushModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

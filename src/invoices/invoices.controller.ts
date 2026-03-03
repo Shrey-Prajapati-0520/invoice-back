@@ -16,6 +16,7 @@ import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { InvoiceRealtimeGateway } from '../invoice-realtime/invoice-realtime.gateway';
 import {
   normalizePhone,
   normalizeEmail,
@@ -38,6 +39,7 @@ export class InvoicesController {
     private mail: MailService,
     private notifications: NotificationsService,
     private push: PushService,
+    private invoiceRealtime: InvoiceRealtimeGateway,
   ) {}
 
   private getClient() {
@@ -407,6 +409,17 @@ export class InvoicesController {
     }
     if (pushRecipients.length > 0) {
       await this.push.sendMany(pushRecipients);
+    }
+
+    // Realtime: emit to WebSocket subscribers (User B with app open)
+    try {
+      this.invoiceRealtime.emitNewInvoice(
+        recipientPhone,
+        Array.from(receiverIds),
+        resolved as unknown as Record<string, unknown>,
+      );
+    } catch {
+      /* non-fatal */
     }
 
     return resolved;
