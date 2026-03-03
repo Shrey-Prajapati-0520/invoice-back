@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Post,
   Request,
   UseGuards,
@@ -13,6 +14,8 @@ import { AuthGuard } from '../auth/auth.guard';
 @Controller('verification-status')
 @UseGuards(AuthGuard)
 export class VerificationStatusController {
+  private readonly logger = new Logger(VerificationStatusController.name);
+
   constructor(private readonly supabase: SupabaseService) {}
 
   private getClient() {
@@ -63,7 +66,10 @@ export class VerificationStatusController {
       .upsert(payload, { onConflict: 'user_id' })
       .select()
       .single();
-    if (error) throw new BadRequestException(error.message);
+    if (error) {
+      this.logger.warn(`PAN upsert failed: ${error.message} (code: ${error.code})`);
+      throw new BadRequestException(error.message);
+    }
     return data;
   }
 
