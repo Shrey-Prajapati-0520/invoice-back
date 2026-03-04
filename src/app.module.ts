@@ -25,6 +25,7 @@ import { PushModule } from './push/push.module';
 import { HealthModule } from './health/health.module';
 import { ReminderSettingsModule } from './reminder-settings/reminder-settings.module';
 import { RemindersModule } from './reminders/reminders.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { RemindersModule } from './reminders/reminders.module';
     HealthModule,
     ReminderSettingsModule,
     RemindersModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
