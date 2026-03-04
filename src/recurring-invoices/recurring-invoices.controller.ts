@@ -55,7 +55,7 @@ export class RecurringInvoicesController {
     // Ensure profile exists and sync phone/email from auth (so User B sees received)
     if (!profile && profileErr?.code === 'PGRST116') {
       const initPhone = metaPhone && normalizePhone(metaPhone).length >= 10 ? normalizePhone(metaPhone) : null;
-      const initEmail = metaEmail || authEmail ? (metaEmail || authEmail).toString().trim().toLowerCase() : null;
+      const initEmail = (metaEmail ?? authEmail) ? String(metaEmail ?? authEmail).trim().toLowerCase() : null;
       try {
         const { data: inserted } = await client
           .from('profiles')
@@ -77,7 +77,7 @@ export class RecurringInvoicesController {
     if (needsPhoneSync || needsEmailSync) {
       const updates: Record<string, string | null> = {};
       if (needsPhoneSync) updates.phone = normalizePhone(metaPhone);
-      if (needsEmailSync) updates.email = (metaEmail || authEmail)?.toString().trim().toLowerCase() || null;
+      if (needsEmailSync) updates.email = (metaEmail ?? authEmail) ? String(metaEmail ?? authEmail).trim().toLowerCase() || null : null;
       if (Object.keys(updates).length > 0) {
         try {
           const { data: synced } = await client
