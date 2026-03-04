@@ -109,36 +109,24 @@ export class VerificationStatusController {
       throw new BadRequestException('Invalid GSTIN format. Use 15 characters e.g. 24ABCDE1234F1Z5');
     }
     const userId = req.user.id;
-    const updatePayload = {
+    const payload = {
+      user_id: userId,
       gstin: 'verified',
       gstin_number: gstinNumber,
       gstin_verified_at: new Date().toISOString(),
     };
     const client = this.getClient();
 
-    const { data: updated, error: updateError } = await client
+    const { data, error } = await client
       .from('verification_status')
-      .update(updatePayload)
-      .eq('user_id', userId)
-      .select()
-      .maybeSingle();
-
-    if (updateError) {
-      this.logger.warn(`GSTIN update failed: ${updateError.message} (code: ${updateError.code})`);
-      throw new BadRequestException(updateError.message);
-    }
-    if (updated) return updated;
-
-    const { data: inserted, error: insertError } = await client
-      .from('verification_status')
-      .insert({ user_id: userId, ...updatePayload })
+      .upsert(payload, { onConflict: 'user_id' })
       .select()
       .single();
 
-    if (insertError) {
-      this.logger.warn(`GSTIN insert failed: ${insertError.message} (code: ${insertError.code})`);
-      throw new BadRequestException(insertError.message);
+    if (error) {
+      this.logger.warn(`GSTIN save failed: ${error.message} (code: ${error.code})`);
+      throw new BadRequestException(error.message);
     }
-    return inserted;
+    return data;
   }
 }

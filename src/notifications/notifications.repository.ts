@@ -45,7 +45,10 @@ export class NotificationsRepository {
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
-    if (error) return [];
+    if (error) {
+      if (error.code === '42P01') console.error('[Notifications] Table "notifications" does not exist. Run supabase/notifications-table.sql');
+      return [];
+    }
     return (data ?? []) as NotificationRow[];
   }
 
@@ -78,6 +81,8 @@ export class NotificationsRepository {
       .single();
     if (error) {
       if (error.code === '23505') return null; // Duplicate (unique index) – skip
+      if (error.code === '42P01') console.error('[Notifications] Table "notifications" does not exist. Run supabase/notifications-table.sql');
+      else console.warn('[Notifications] Insert failed:', error.code, error.message);
       return null;
     }
     return data as NotificationRow;

@@ -41,16 +41,60 @@ export class RecurringInvoicesController {
   async list(@Request() req: { user: { id: string; email?: string } }) {
     const client = this.getClient();
 
-    const { data: profile, error: profileErr } = await client
+    let { data: profile, error: profileErr } = await client
       .from('profiles')
       .select('phone, email')
       .eq('id', req.user.id)
       .single();
-    const meta = (req.user as { user_metadata?: { phone?: string; email?: string } }).user_metadata ?? {};
+    const meta = (req.user as { user_metadata?: { phone?: string; email?: string; full_name?: string } }).user_metadata ?? {};
     const authEmail = (req.user as { email?: string }).email;
     const authPhone = (req.user as { phone?: string }).phone;
-    const profilePhone = (profile as { phone?: string } | null)?.phone ?? meta?.phone;
-    const profileEmail = (profile as { email?: string } | null)?.email ?? authEmail;
+    const metaPhone = meta?.phone ?? authPhone;
+    const metaEmail = meta?.email ?? authEmail;
+
+    // Ensure profile exists and sync phone/email from auth (so User B sees received)
+    if (!profile && profileErr?.code === 'PGRST116') {
+      const initPhone = metaPhone && normalizePhone(metaPhone).length >= 10 ? normalizePhone(metaPhone) : null;
+      const initEmail = metaEmail || authEmail ? (metaEmail || authEmail).toString().trim().toLowerCase() : null;
+      try {
+        const { data: inserted } = await client
+          .from('profiles')
+          .upsert(
+            { id: req.user.id, full_name: meta?.full_name ?? null, email: initEmail, phone: initPhone },
+            { onConflict: 'id' },
+          )
+          .select('phone, email')
+          .single();
+        if (inserted) profile = inserted;
+      } catch {
+        /* non-fatal */
+      }
+    }
+    const storedPhone = (profile as { phone?: string } | null)?.phone;
+    const storedEmail = (profile as { email?: string } | null)?.email;
+    const needsPhoneSync = !storedPhone && metaPhone && normalizePhone(metaPhone).length >= 10;
+    const needsEmailSync = !storedEmail && (metaEmail || authEmail);
+    if (needsPhoneSync || needsEmailSync) {
+      const updates: Record<string, string | null> = {};
+      if (needsPhoneSync) updates.phone = normalizePhone(metaPhone);
+      if (needsEmailSync) updates.email = (metaEmail || authEmail)?.toString().trim().toLowerCase() || null;
+      if (Object.keys(updates).length > 0) {
+        try {
+          const { data: synced } = await client
+            .from('profiles')
+            .update(updates)
+            .eq('id', req.user.id)
+            .select('phone, email')
+            .single();
+          if (synced) profile = synced as typeof profile;
+        } catch {
+          /* non-fatal */
+        }
+      }
+    }
+
+    const profilePhone = (profile as { phone?: string } | null)?.phone ?? metaPhone;
+    const profileEmail = (profile as { email?: string } | null)?.email ?? authEmail ?? metaEmail;
     const myPhone = profilePhone ? normalizePhone(profilePhone) : '';
     const myEmail = profileEmail ? (profileEmail as string).trim().toLowerCase() : '';
 
