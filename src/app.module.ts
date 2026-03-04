@@ -23,6 +23,8 @@ import { MessagesModule } from './messages/messages.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PushModule } from './push/push.module';
 import { HealthModule } from './health/health.module';
+import { ReminderSettingsModule } from './reminder-settings/reminder-settings.module';
+import { RemindersModule } from './reminders/reminders.module';
 
 @Module({
   imports: [
@@ -48,6 +50,8 @@ import { HealthModule } from './health/health.module';
     NotificationsModule,
     PushModule,
     HealthModule,
+    ReminderSettingsModule,
+    RemindersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

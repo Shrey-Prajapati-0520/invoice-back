@@ -57,4 +57,45 @@ export class MailService {
       console.log(`[Mail] No SMTP configured. Invoice notification for ${to}: ${invoiceNumber} from ${senderName}`);
     }
   }
+
+  async sendReminderEmail(options: {
+    to: string;
+    cc?: string;
+    senderName: string;
+    subject: string;
+    body: string;
+    invoiceNumber?: string;
+    amount?: string;
+    dueDate?: string;
+  }): Promise<void> {
+    const { to, cc, senderName, subject, body, invoiceNumber, amount, dueDate } = options;
+    const html = `
+      <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto;">
+        <p style="white-space: pre-wrap;">${body.replace(/\n/g, '<br>')}</p>
+        ${invoiceNumber || amount || dueDate ? `
+        <div style="margin-top: 16px; padding: 12px; background: #f3f4f6; border-radius: 8px;">
+          ${invoiceNumber ? `<p><strong>Invoice:</strong> ${invoiceNumber}</p>` : ''}
+          ${amount ? `<p><strong>Amount:</strong> ${amount}</p>` : ''}
+          ${dueDate ? `<p><strong>Due Date:</strong> ${dueDate}</p>` : ''}
+        </div>
+        ` : ''}
+      </div>
+    `;
+
+    const mailOptions: { to: string; cc?: string; subject: string; html: string } = {
+      to: to.trim().toLowerCase(),
+      subject,
+      html,
+    };
+    if (cc?.trim()) mailOptions.cc = cc.trim().toLowerCase();
+
+    if (this.transporter) {
+      await this.transporter.sendMail({
+        from: this.config.get('SMTP_FROM') || 'InvoiceBill <noreply@invoicebill.com>',
+        ...mailOptions,
+      });
+    } else {
+      console.log(`[Mail] No SMTP configured. Reminder for ${to}: ${subject} from ${senderName}`);
+    }
+  }
 }

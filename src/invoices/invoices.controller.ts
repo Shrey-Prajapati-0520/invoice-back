@@ -188,6 +188,7 @@ export class InvoicesController {
       notes?: string;
       include_gst?: boolean;
       payment_type?: 'full' | 'milestone' | 'recurring';
+      enable_reminders?: boolean;
       items?: InvoiceItemDto[];
     },
   ) {
@@ -230,6 +231,7 @@ export class InvoicesController {
       notes: body.notes || null,
       include_gst: body.include_gst ?? true,
       payment_type: body.payment_type || null,
+      enable_reminders: body.enable_reminders ?? false,
     };
     const { data: invoice, error: invError } = await this.getClient()
       .from('invoices')
