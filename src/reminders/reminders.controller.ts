@@ -8,7 +8,9 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { MailService } from '../mail/mail.service';
+import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { normalizePhone } from '../recipient.util';
 
 @Controller('reminders')
 @UseGuards(AuthGuard)
@@ -16,6 +18,7 @@ export class RemindersController {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly mail: MailService,
+    private readonly push: PushService,
   ) {}
 
   private getClient() {
@@ -169,6 +172,58 @@ export class RemindersController {
           recipient_phone: recipientPhone.trim(),
           subject: subjText,
         });
+      }
+    }
+
+    // Push notifications: sender and receivers (handles null/empty tokens – no crash)
+    const pushRecipients: Array<{ token: string; title: string; body: string; data?: Record<string, unknown> }> = [];
+    const senderTokens = await this.push.getTokensForUser(req.user.id);
+    for (const token of senderTokens) {
+      pushRecipients.push({
+        token,
+        title: 'Reminders sent',
+        body: `You sent ${sent.length} reminder${sent.length !== 1 ? 's' : ''} to your clients.`,
+        data: { type: 'reminder', count: sent.length },
+      });
+    }
+    const receiverIds = new Set<string>();
+    for (const inv of invoices) {
+      const cust = inv.customers as { name?: string; email?: string; phone?: string } | null;
+      const recipientEmail = (inv.recipient_email as string) || cust?.email;
+      const recipientPhone = (inv.recipient_phone as string) || cust?.phone;
+      if (recipientPhone) {
+        const phone10 = normalizePhone(recipientPhone);
+        const [exact, suffix] = await Promise.all([
+          client.from('profiles').select('id').eq('phone', phone10).neq('id', req.user.id),
+          client.from('profiles').select('id').neq('id', req.user.id).ilike('phone', `%${phone10}`),
+        ]);
+        [...(exact.data ?? []), ...(suffix.data ?? [])].forEach((p: { id: string }) => receiverIds.add(String(p.id)));
+      }
+      if (recipientEmail?.trim()) {
+        const { data: byEmail } = await client
+          .from('profiles')
+          .select('id')
+          .ilike('email', recipientEmail.trim())
+          .neq('id', req.user.id);
+        (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(String(p.id)));
+      }
+    }
+    for (const receiverId of receiverIds) {
+      const receiverTokens = await this.push.getTokensForUser(receiverId);
+      for (const token of receiverTokens) {
+        pushRecipients.push({
+          token,
+          title: `Payment reminder from ${senderName}`,
+          body: `${senderName} sent you a payment reminder for your invoice(s).`,
+          data: { type: 'reminder', deep_link_screen: 'invoices' },
+        });
+      }
+    }
+    if (pushRecipients.length > 0) {
+      try {
+        await this.push.sendMany(pushRecipients);
+      } catch (e) {
+        console.error('[Reminders] Push failed:', e);
       }
     }
 

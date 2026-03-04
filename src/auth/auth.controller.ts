@@ -5,12 +5,16 @@ import {
   Post,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase.service';
 import { phoneForStorage } from '../recipient.util';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private supabase: SupabaseService) {}
+  constructor(
+    private supabase: SupabaseService,
+    private config: ConfigService,
+  ) {}
 
   @Post('register')
   async register(
@@ -140,5 +144,44 @@ export class AuthController {
       .auth.refreshSession({ refresh_token: body.refresh_token });
     if (error) throw new UnauthorizedException(error.message);
     return { session: data.session };
+  }
+
+  @Post('forgot-password')
+  async forgotPassword(@Body() body: { email: string }) {
+    const email = body?.email?.trim?.();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('Valid email is required');
+    }
+    const baseUrl = (this.config.get<string>('RESET_PASSWORD_REDIRECT_URL')
+      || this.config.get<string>('API_URL')
+      || process.env.RAILWAY_STATIC_URL
+      || '').trim();
+    const redirectTo = baseUrl ? `${baseUrl.replace(/\/$/, '')}/reset-password` : undefined;
+    const { error } = await this.supabase.getClient().auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+    if (error) throw new BadRequestException(error.message);
+    return { success: true, message: 'If an account exists, a reset link has been sent to your email.' };
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() body: { access_token: string; new_password: string }) {
+    const token = body?.access_token?.trim?.();
+    const newPassword = body?.new_password?.trim?.();
+    if (!token || !newPassword) {
+      throw new BadRequestException('Token and new password are required');
+    }
+    if (newPassword.length < 6) {
+      throw new BadRequestException('Password must be at least 6 characters');
+    }
+    const { data: { user }, error: getUserError } = await this.supabase.getClient().auth.getUser(token);
+    if (getUserError || !user) {
+      throw new UnauthorizedException('Invalid or expired reset link. Please request a new one.');
+    }
+    const { error } = await this.supabase.getClient().auth.admin.updateUserById(user.id, {
+      password: newPassword,
+    });
+    if (error) throw new UnauthorizedException(error.message);
+    return { success: true };
   }
 }
