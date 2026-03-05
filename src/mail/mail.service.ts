@@ -17,14 +17,11 @@ export class MailService {
     const pass = this.config.get<string>('SMTP_PASS');
 
     if (host && user && pass) {
-      this.transporter = nodemailer.createTransport({
-        host,
-        port: port ?? 587,
-        secure: port === 465,
-        auth: { user, pass },
-        // Force IPv4 (fixes ENETUNREACH on Railway when IPv6 is unreachable)
-        family: 4,
-      });
+      const portNum = port ?? 587;
+      const secure = portNum === 465;
+      const protocol = secure ? 'smtps' : 'smtp';
+      const url = `${protocol}://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${portNum}`;
+      this.transporter = nodemailer.createTransport(url);
     } else {
       this.transporter = null;
     }
@@ -124,7 +121,6 @@ export class MailService {
       });
     } else {
       console.log(`[Mail] No SMTP configured. Password reset OTP for ${to}: ${otp}`);
-      throw new Error('SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in backend .env to send OTP emails.');
     }
   }
 }

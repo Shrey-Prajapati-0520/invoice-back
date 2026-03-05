@@ -7,9 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as jwt from 'jsonwebtoken';
 import { SupabaseService } from '../supabase.service';
-import { MailService } from '../mail/mail.service';
 import { phoneForStorage } from '../recipient.util';
 
 @Controller('auth')
@@ -19,7 +17,6 @@ export class AuthController {
   constructor(
     private supabase: SupabaseService,
     private config: ConfigService,
-    private mail: MailService,
   ) {}
 
   @Post('register')
@@ -164,85 +161,19 @@ export class AuthController {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new BadRequestException('Valid email is required');
     }
-    const { data: users } = await this.supabase.getClient().auth.admin.listUsers({ perPage: 1000 });
-    const user = users?.users?.find((u: { email?: string }) => (u.email || '').toLowerCase() === email);
-    if (!user) {
-      return { success: true, message: 'If an account exists, a 6-digit code has been sent to your email.' };
-    }
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    await this.supabase
-      .getClient()
-      .from('password_reset_otps')
-      .insert({ email, otp, expires_at: expiresAt });
-    try {
-      await this.mail.sendPasswordResetOtp({ to: email, otp });
-    } catch (e) {
-      this.logger.warn(`Failed to send OTP email to ${email}: ${e}`);
-      throw new BadRequestException('Failed to send verification code. Please try again.');
-    }
-    return { success: true, message: 'A 6-digit code has been sent to your email. It expires in 60 minutes.' };
-  }
-
-  @Post('verify-reset-otp')
-  async verifyResetOtp(@Body() body: { email: string; otp: string }) {
-    const email = (body?.email?.trim?.() || '').toLowerCase();
-    const otp = body?.otp?.trim?.() || '';
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new BadRequestException('Valid email is required');
-    }
-    if (!/^\d{6}$/.test(otp)) {
-      throw new BadRequestException('Please enter the 6-digit code from your email.');
-    }
-    const { data: row } = await this.supabase
-      .getClient()
-      .from('password_reset_otps')
-      .select('id')
-      .eq('email', email)
-      .eq('otp', otp)
-      .gte('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!row) {
-      throw new UnauthorizedException('Invalid or expired code. Please request a new one.');
-    }
-    const secret = this.config.get<string>('JWT_SECRET') || this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY') || 'reset-secret';
-    const resetToken = jwt.sign({ email, purpose: 'password-reset' }, secret, { expiresIn: '10m' });
-    return { reset_token: resetToken };
-  }
-
-  @Post('reset-password-with-otp')
-  async resetPasswordWithOtp(@Body() body: { reset_token: string; new_password: string }) {
-    const resetToken = body?.reset_token?.trim?.();
-    const newPassword = body?.new_password?.trim?.();
-    if (!resetToken || !newPassword) {
-      throw new BadRequestException('Session expired. Please start the reset process again.');
-    }
-    if (newPassword.length < 6) {
-      throw new BadRequestException('Password must be at least 6 characters');
-    }
-    const secret = this.config.get<string>('JWT_SECRET') || this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY') || 'reset-secret';
-    let payload: { email?: string; purpose?: string };
-    try {
-      payload = jwt.verify(resetToken, secret) as { email?: string; purpose?: string };
-    } catch {
-      throw new UnauthorizedException('Session expired. Please start the reset process again.');
-    }
-    if (payload?.purpose !== 'password-reset' || !payload?.email) {
-      throw new UnauthorizedException('Invalid session. Please start the reset process again.');
-    }
-    const email = payload.email.toLowerCase();
-    const { data: users } = await this.supabase.getClient().auth.admin.listUsers({ perPage: 1000 });
-    const user = users?.users?.find((u: { email?: string }) => (u.email || '').toLowerCase() === email);
-    if (!user) {
-      throw new UnauthorizedException('Account not found. Please sign up.');
-    }
-    const { error } = await this.supabase.getClient().auth.admin.updateUserById(user.id, {
-      password: newPassword,
+    const baseUrl = (
+      this.config.get<string>('RESET_PASSWORD_REDIRECT_URL') ||
+      this.config.get<string>('API_URL') ||
+      this.config.get<string>('RAILWAY_STATIC_URL') ||
+      process.env.RAILWAY_STATIC_URL ||
+      ''
+    ).trim();
+    const redirectTo = baseUrl ? `${baseUrl.replace(/\/$/, '')}/reset-password` : undefined;
+    const { error } = await this.supabase.getClient().auth.resetPasswordForEmail(email, {
+      redirectTo,
     });
     if (error) throw new BadRequestException(error.message);
-    return { success: true };
+    return { success: true, message: 'If an account exists, a reset link has been sent to your email. Click the link to set your new password.' };
   }
 
   @Post('reset-password')
