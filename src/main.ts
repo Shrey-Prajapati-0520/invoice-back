@@ -1,6 +1,12 @@
 import { NestFactory } from '@nestjs/core';
+import * as dns from 'dns';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/http-exception.filter';
+
+// Prefer IPv4 for SMTP (fixes ENETUNREACH when IPv6 is unavailable)
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);

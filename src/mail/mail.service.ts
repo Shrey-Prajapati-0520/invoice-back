@@ -122,6 +122,7 @@ export class MailService {
       });
     } else {
       console.log(`[Mail] No SMTP configured. Password reset OTP for ${to}: ${otp}`);
+      throw new Error('SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in backend .env to send OTP emails.');
     }
   }
 }
