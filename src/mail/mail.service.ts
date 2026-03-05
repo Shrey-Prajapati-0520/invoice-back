@@ -22,6 +22,8 @@ export class MailService {
         port: port ?? 587,
         secure: port === 465,
         auth: { user, pass },
+        // Force IPv4 (fixes ENETUNREACH on Railway when IPv6 is unreachable)
+        family: 4,
       });
     } else {
       this.transporter = null;
