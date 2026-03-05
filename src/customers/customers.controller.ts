@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -18,6 +19,8 @@ import { phoneForStorage, emailForStorage } from '../recipient.util';
 @Controller('customers')
 @UseGuards(AuthGuard)
 export class CustomersController {
+  private readonly logger = new Logger(CustomersController.name);
+
   constructor(private supabase: SupabaseService) {}
 
   private getClient() {
@@ -32,7 +35,9 @@ export class CustomersController {
       .eq('user_id', req.user.id)
       .order('created_at', { ascending: false });
     if (error) throw new BadRequestException(error.message);
-    return data ?? [];
+    const list = data ?? [];
+    this.logger.log(`GET /customers user=${req.user.id} count=${list.length}`);
+    return list;
   }
 
   @Post()

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Post,
@@ -30,6 +31,8 @@ interface QuotationItemDto {
 @Controller('quotations')
 @UseGuards(AuthGuard)
 export class QuotationsController {
+  private readonly logger = new Logger(QuotationsController.name);
+
   constructor(
     private supabase: SupabaseService,
     private notifications: NotificationsService,
@@ -306,12 +309,21 @@ export class QuotationsController {
       }
     }
     if (recipientEmail) {
-      const { data: byEmail } = await this.getClient()
-        .from('profiles')
-        .select('id')
-        .ilike('email', recipientEmail)
-        .neq('id', req.user.id);
-      (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      const normEmail = normalizeEmail(recipientEmail);
+      if (normEmail) {
+        const { data: byEmail } = await this.getClient()
+          .from('profiles')
+          .select('id')
+          .ilike('email', normEmail)
+          .neq('id', req.user.id);
+        (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      }
+    }
+    if (receiverIds.size === 0) {
+      this.logger.warn(
+        `[Receiver] No receivers for quotation ${resolved.quo_number} ` +
+        `(recipient_phone=${recipientPhone ? '***' + recipientPhone.slice(-4) : 'null'}, recipient_email=${recipientEmail ? 'set' : 'null'})`,
+      );
     }
     const receiverPhones = new Map<string, string>();
     if (receiverIds.size > 0) {

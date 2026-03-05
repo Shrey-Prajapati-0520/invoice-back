@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -34,6 +35,8 @@ interface InvoiceItemDto {
 @Controller('invoices')
 @UseGuards(AuthGuard)
 export class InvoicesController {
+  private readonly logger = new Logger(InvoicesController.name);
+
   constructor(
     private supabase: SupabaseService,
     private mail: MailService,
@@ -327,11 +330,11 @@ export class InvoicesController {
         if (Array.isArray(byPhoneRpc)) {
           byPhoneRpc.forEach((r: { id?: string }) => r?.id && receiverIds.add(String(r.id)));
         }
-      } catch {
-        /* RPC may not exist; fall through to direct query */
+      } catch (rpcErr) {
+        this.logger.debug(`find_receiver_ids_by_phone RPC failed, using fallback: ${(rpcErr as Error)?.message}`);
       }
       if (receiverIds.size === 0) {
-        // Fallback: exact match (10 digits) or suffix match (handles +91xxx, etc.)
+        // Fallback: exact match (10 digits) or suffix match (handles +91xxx, 919876543210, etc.)
         const [exact, suffix] = await Promise.all([
           this.getClient()
             .from('profiles')
@@ -350,12 +353,22 @@ export class InvoicesController {
       }
     }
     if (recipientEmail) {
-      const { data: byEmail } = await this.getClient()
-        .from('profiles')
-        .select('id')
-        .ilike('email', recipientEmail)
-        .neq('id', req.user.id);
-      (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      const normEmail = normalizeEmail(recipientEmail);
+      if (normEmail) {
+        const { data: byEmail } = await this.getClient()
+          .from('profiles')
+          .select('id')
+          .ilike('email', normEmail)
+          .neq('id', req.user.id);
+        (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      }
+    }
+    if (receiverIds.size === 0) {
+      this.logger.warn(
+        `[Receiver] No receivers found for invoice ${resolved.number} ` +
+        `(recipient_phone=${recipientPhone ? '***' + recipientPhone.slice(-4) : 'null'}, ` +
+        `recipient_email=${recipientEmail ? 'set' : 'null'}). Run recipient-lookup-function.sql and fix-signup-profile-phone.sql.`,
+      );
     }
     // Fetch receiver phones for notifications
     const receiverPhones = new Map<string, string>();

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Post,
   Request,
   UseGuards,
@@ -13,6 +14,7 @@ import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
 import {
   normalizePhone,
+  normalizeEmail,
   phoneForStorage,
   emailForStorage,
 } from '../recipient.util';
@@ -27,6 +29,8 @@ interface RecurringItemDto {
 @Controller('recurring-invoices')
 @UseGuards(AuthGuard)
 export class RecurringInvoicesController {
+  private readonly logger = new Logger(RecurringInvoicesController.name);
+
   constructor(
     private supabase: SupabaseService,
     private notifications: NotificationsService,
@@ -345,12 +349,21 @@ export class RecurringInvoicesController {
       }
     }
     if (recipientEmail) {
-      const { data: byEmail } = await this.getClient()
-        .from('profiles')
-        .select('id')
-        .ilike('email', recipientEmail)
-        .neq('id', req.user.id);
-      (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      const normEmail = normalizeEmail(recipientEmail);
+      if (normEmail) {
+        const { data: byEmail } = await this.getClient()
+          .from('profiles')
+          .select('id')
+          .ilike('email', normEmail)
+          .neq('id', req.user.id);
+        (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
+      }
+    }
+    if (receiverIds.size === 0) {
+      this.logger.warn(
+        `[Receiver] No receivers for recurring "${resolved.name}" ` +
+        `(recipient_phone=${recipientPhone ? '***' + recipientPhone.slice(-4) : 'null'}, recipient_email=${recipientEmail ? 'set' : 'null'})`,
+      );
     }
 
     const receiverPhones = new Map<string, string>();
