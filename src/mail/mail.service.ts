@@ -98,4 +98,30 @@ export class MailService {
       console.log(`[Mail] No SMTP configured. Reminder for ${to}: ${subject} from ${senderName}`);
     }
   }
+
+  async sendPasswordResetOtp(options: { to: string; otp: string }): Promise<void> {
+    const { to, otp } = options;
+    const subject = 'Reset Your Password';
+    const html = `
+      <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; text-align: center;">
+        <div style="background: #EFF6FF; border: 3px solid #7C3AED; border-radius: 12px; padding: 30px; margin: 30px 0;">
+          <div style="font-size: 12px; color: #7C3AED; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; margin-bottom: 15px;">Your Verification Code</div>
+          <div style="font-size: 40px; font-weight: bold; color: #7C3AED; letter-spacing: 10px; font-family: 'Courier New', Monaco, monospace;">${otp}</div>
+        </div>
+        <p style="color: #888; font-size: 14px;">This code expires in <strong>60 minutes</strong>. If you didn't request this code, please ignore this email.</p>
+        <p style="color: #999; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0;">This is an automated message from Trustopay. Please do not reply to this email.</p>
+      </div>
+    `;
+
+    if (this.transporter) {
+      await this.transporter.sendMail({
+        from: this.config.get('SMTP_FROM') || 'Trustopay <noreply@trustopay.com>',
+        to: to.trim().toLowerCase(),
+        subject,
+        html,
+      });
+    } else {
+      console.log(`[Mail] No SMTP configured. Password reset OTP for ${to}: ${otp}`);
+    }
+  }
 }
