@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Logger,
   Post,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -11,6 +12,8 @@ import { phoneForStorage } from '../recipient.util';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private supabase: SupabaseService,
     private config: ConfigService,
@@ -97,6 +100,12 @@ export class AuthController {
     } catch (e) {
       if (e instanceof BadRequestException) throw e;
       const msg = e instanceof Error ? e.message : 'Registration failed. Please try again.';
+      this.logger.warn(`Signup failed for ${email}: ${msg}`);
+      if (msg.toLowerCase().includes('database error saving new user')) {
+        throw new BadRequestException(
+          'Account creation failed. Please try again. If the problem persists, contact support.',
+        );
+      }
       throw new BadRequestException(msg);
     }
   }
