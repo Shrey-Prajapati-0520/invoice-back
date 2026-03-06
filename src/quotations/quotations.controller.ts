@@ -20,6 +20,7 @@ import {
   phoneForStorage,
   emailForStorage,
 } from '../recipient.util';
+import { findReceiverIds } from '../receiver-lookup.util';
 
 interface QuotationItemDto {
   name: string;
@@ -279,52 +280,14 @@ export class QuotationsController {
     }
 
     // Receiver in-app notification: find User B by recipient phone/email
-    const receiverIds = new Set<string>();
-    if (recipientPhone) {
-      try {
-        const { data: byPhoneRpc } = await this.getClient()
-          .rpc('find_receiver_ids_by_phone', { phone_10: recipientPhone, exclude_id: req.user.id });
-        if (Array.isArray(byPhoneRpc)) {
-          byPhoneRpc.forEach((r: { id?: string }) => r?.id && receiverIds.add(String(r.id)));
-        }
-      } catch {
-        /* RPC may not exist; fall through */
-      }
-      if (receiverIds.size === 0) {
-        const [exact, suffix] = await Promise.all([
-          this.getClient()
-            .from('profiles')
-            .select('id')
-            .eq('phone', recipientPhone)
-            .neq('id', req.user.id),
-          this.getClient()
-            .from('profiles')
-            .select('id')
-            .neq('id', req.user.id)
-            .ilike('phone', `%${recipientPhone}`),
-        ]);
-        [...(exact.data ?? []), ...(suffix.data ?? [])].forEach((p: { id: string }) =>
-          receiverIds.add(String(p.id)),
-        );
-      }
-    }
-    if (recipientEmail) {
-      const normEmail = normalizeEmail(recipientEmail);
-      if (normEmail) {
-        const { data: byEmail } = await this.getClient()
-          .from('profiles')
-          .select('id')
-          .ilike('email', normEmail)
-          .neq('id', req.user.id);
-        (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
-      }
-    }
-    if (receiverIds.size === 0) {
-      this.logger.warn(
-        `[Receiver] No receivers for quotation ${resolved.quo_number} ` +
-        `(recipient_phone=${recipientPhone ? '***' + recipientPhone.slice(-4) : 'null'}, recipient_email=${recipientEmail ? 'set' : 'null'})`,
-      );
-    }
+    const receiverIds = await findReceiverIds({
+      recipientPhone,
+      recipientEmail,
+      excludeId: req.user.id,
+      getClient: () => this.getClient(),
+      logContext: `quotation ${resolved.quo_number}`,
+      onLog: (msg) => this.logger.log(msg),
+    });
     const receiverPhones = new Map<string, string>();
     if (receiverIds.size > 0) {
       const { data: profiles } = await this.getClient()
@@ -365,30 +328,38 @@ export class QuotationsController {
     }
 
     // Push notifications: sender and receiver (supports multiple devices per user)
-    const pushData = { type: 'quotation', id: resolved.id };
-    const pushRecipients: Array<{ token: string; title: string; body: string; data?: Record<string, unknown> }> = [];
-    const senderTokens = await this.push.getTokensForUser(req.user.id);
-    for (const token of senderTokens) {
-      pushRecipients.push({
-        token,
-        title: `Quotation ${resolved.quo_number} sent`,
-        body: `You sent quotation ${resolved.quo_number} to ${customerName}.`,
-        data: pushData,
-      });
-    }
-    for (const receiverId of receiverIds) {
-      const receiverTokens = await this.push.getTokensForUser(receiverId);
-      for (const token of receiverTokens) {
+    try {
+      const pushData = { type: 'quotation', id: resolved.id };
+      const pushRecipients: Array<{ token: string; title: string; body: string; data?: Record<string, unknown> }> = [];
+      const senderTokens = await this.push.getTokensForUser(req.user.id);
+      for (const token of senderTokens) {
         pushRecipients.push({
           token,
-          title: `New quotation from ${senderName}`,
-          body: `${senderName} sent you quotation ${resolved.quo_number} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
+          title: `Quotation ${resolved.quo_number} sent`,
+          body: `You sent quotation ${resolved.quo_number} to ${customerName}.`,
           data: pushData,
         });
       }
-    }
-    if (pushRecipients.length > 0) {
-      await this.push.sendMany(pushRecipients);
+      for (const receiverId of receiverIds) {
+        const receiverTokens = await this.push.getTokensForUser(receiverId);
+        if (receiverTokens.length === 0) {
+          this.logger.log(`[Push] User ${receiverId} has 0 tokens – no push sent`);
+        }
+        for (const token of receiverTokens) {
+          pushRecipients.push({
+            token,
+            title: `New quotation from ${senderName}`,
+            body: `${senderName} sent you quotation ${resolved.quo_number} for ₹${Number(resolved.amount || 0).toLocaleString('en-IN')}.`,
+            data: pushData,
+          });
+        }
+      }
+      if (pushRecipients.length > 0) {
+        await this.push.sendMany(pushRecipients);
+        this.logger.log(`[Push] Sent to ${senderTokens.length} sender + ${pushRecipients.length - senderTokens.length} receiver token(s)`);
+      }
+    } catch (pushErr) {
+      this.logger.warn(`[Push] Quotation ${resolved.quo_number} push failed (non-fatal):`, (pushErr as Error)?.message);
     }
 
     return resolved;
