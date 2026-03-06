@@ -2,12 +2,16 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   Logger,
   Post,
+  Request,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase.service';
+import { AuthGuard } from './auth.guard';
 import { phoneForStorage } from '../recipient.util';
 
 @Controller('auth')
@@ -18,6 +22,12 @@ export class AuthController {
     private supabase: SupabaseService,
     private config: ConfigService,
   ) {}
+
+  @Get('me')
+  @UseGuards(AuthGuard)
+  me(@Request() req: { user: unknown }) {
+    return { user: req.user };
+  }
 
   @Post('register')
   async register(
