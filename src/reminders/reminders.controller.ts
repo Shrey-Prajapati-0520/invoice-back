@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Logger,
   Post,
   Request,
   UseGuards,
@@ -9,16 +10,20 @@ import {
 import { SupabaseService } from '../supabase.service';
 import { MailService } from '../mail/mail.service';
 import { PushService } from '../push/push.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthGuard } from '../auth/auth.guard';
-import { normalizePhone } from '../recipient.util';
+import { normalizePhone, phoneForStorage } from '../recipient.util';
 
 @Controller('reminders')
 @UseGuards(AuthGuard)
 export class RemindersController {
+  private readonly logger = new Logger(RemindersController.name);
+
   constructor(
     private readonly supabase: SupabaseService,
     private readonly mail: MailService,
     private readonly push: PushService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private getClient() {
@@ -79,10 +84,13 @@ export class RemindersController {
 
     const { data: profile } = await client
       .from('profiles')
-      .select('full_name, email')
+      .select('full_name, email, phone')
       .eq('id', req.user.id)
       .single();
     const senderName = (profile as { full_name?: string })?.full_name || 'InvoiceBill User';
+    const senderPhone = (profile as { phone?: string })?.phone
+      ? normalizePhone((profile as { phone?: string }).phone)
+      : null;
     const myEmail = (profile as { email?: string })?.email || req.user.email || '';
 
     const sent: { invoice_id: string; channel: string }[] = [];
@@ -191,25 +199,89 @@ export class RemindersController {
       const cust = inv.customers as { name?: string; email?: string; phone?: string } | null;
       const recipientEmail = (inv.recipient_email as string) || cust?.email;
       const recipientPhone = (inv.recipient_phone as string) || cust?.phone;
-      if (recipientPhone) {
-        const phone10 = normalizePhone(recipientPhone);
-        const [exact, suffix] = await Promise.all([
-          client.from('profiles').select('id').eq('phone', phone10).neq('id', req.user.id),
-          client.from('profiles').select('id').neq('id', req.user.id).ilike('phone', `%${phone10}`),
-        ]);
-        [...(exact.data ?? []), ...(suffix.data ?? [])].forEach((p: { id: string }) => receiverIds.add(String(p.id)));
+      const phone10 = recipientPhone ? (phoneForStorage(recipientPhone) || normalizePhone(recipientPhone)) : null;
+      if (phone10) {
+        let foundByPhone = false;
+        try {
+          const { data: byPhoneRpc } = await client.rpc('find_receiver_ids_by_phone', {
+            phone_10: phone10,
+            exclude_id: req.user.id,
+          });
+          if (Array.isArray(byPhoneRpc) && byPhoneRpc.length > 0) {
+            byPhoneRpc.forEach((r: { id?: string }) => r?.id && receiverIds.add(String(r.id)));
+            foundByPhone = true;
+          }
+        } catch {
+          /* RPC fallback */
+        }
+        if (!foundByPhone) {
+          const [exact, suffix] = await Promise.all([
+            client.from('profiles').select('id').eq('phone', phone10).neq('id', req.user.id),
+            client.from('profiles').select('id').neq('id', req.user.id).ilike('phone', `%${phone10}`),
+          ]);
+          [...(exact.data ?? []), ...(suffix.data ?? [])].forEach((p: { id: string }) => receiverIds.add(String(p.id)));
+        }
       }
       if (recipientEmail?.trim()) {
-        const { data: byEmail } = await client
-          .from('profiles')
-          .select('id')
-          .ilike('email', recipientEmail.trim())
-          .neq('id', req.user.id);
-        (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(String(p.id)));
+        const normEmail = (recipientEmail as string).trim().toLowerCase();
+        if (normEmail) {
+          const { data: byEmail } = await client
+            .from('profiles')
+            .select('id')
+            .ilike('email', normEmail)
+            .neq('id', req.user.id);
+          (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(String(p.id)));
+        }
       }
     }
+
+    // Notification center: User A (sender)
+    try {
+      await this.notifications.create({
+        user_id: req.user.id,
+        user_phone: senderPhone,
+        title: 'Reminders sent',
+        body: `You sent ${sent.length} reminder${sent.length !== 1 ? 's' : ''} to your clients.`,
+        type: 'system',
+        reference_id: null,
+        deep_link_screen: 'invoices',
+      });
+    } catch {
+      /* non-fatal */
+    }
+
+    // Notification center: User B (each receiver)
+    const receiverPhones = new Map<string, string>();
+    if (receiverIds.size > 0) {
+      const { data: profiles } = await client
+        .from('profiles')
+        .select('id, phone')
+        .in('id', Array.from(receiverIds));
+      (profiles ?? []).forEach((p: { id: string; phone?: string }) => {
+        if (p.phone) receiverPhones.set(p.id, normalizePhone(p.phone));
+      });
+    }
+    for (const receiverId of receiverIds) {
+      try {
+        await this.notifications.create({
+          user_id: receiverId,
+          user_phone: receiverPhones.get(receiverId) || null,
+          title: `Payment reminder from ${senderName}`,
+          body: `${senderName} sent you a payment reminder for your invoice(s).`,
+          type: 'system',
+          reference_id: null,
+          deep_link_screen: 'invoices',
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
+
     for (const receiverId of receiverIds) {
       const receiverTokens = await this.push.getTokensForUser(receiverId);
+      if (receiverTokens.length === 0) {
+        this.logger.log(`[Push] User ${receiverId} has 0 tokens – no push sent`);
+      }
       for (const token of receiverTokens) {
         pushRecipients.push({
           token,
@@ -222,8 +294,9 @@ export class RemindersController {
     if (pushRecipients.length > 0) {
       try {
         await this.push.sendMany(pushRecipients);
+        this.logger.log(`[Push] Reminders: sent to ${senderTokens.length} sender + ${pushRecipients.length - senderTokens.length} receiver token(s)`);
       } catch (e) {
-        console.error('[Reminders] Push failed:', e);
+        this.logger.warn('[Push] Reminders push failed (non-fatal):', (e as Error)?.message);
       }
     }
 
