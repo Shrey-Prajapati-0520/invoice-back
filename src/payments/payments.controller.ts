@@ -13,10 +13,18 @@ import {
 import * as express from 'express';
 import { PaymentsService } from './payments.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { InvoiceRealtimeGateway } from '../invoice-realtime/invoice-realtime.gateway';
+import { SupabaseService } from '../supabase.service';
+import { findReceiverIds } from '../receiver-lookup.util';
+import { normalizePhone } from '../recipient.util';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly payments: PaymentsService) {}
+  constructor(
+    private readonly payments: PaymentsService,
+    private readonly invoiceRealtime: InvoiceRealtimeGateway,
+    private readonly supabase: SupabaseService,
+  ) {}
 
   /**
    * Create payment init - returns SabPaisa checkout URL and encData.
@@ -127,6 +135,34 @@ export class PaymentsController {
 
       if (result.invoiceId && result.statusCode === '0000') {
         await this.payments.updateInvoiceStatus(result.invoiceId, 'paid');
+        try {
+          const { data: inv } = await this.supabase.getClient().from('invoices')
+            .select('*, customers (id, name, phone, email), invoice_items (*)')
+            .eq('id', result.invoiceId)
+            .single();
+          if (inv) {
+            const invData = inv as { user_id?: string; recipient_phone?: string; recipient_email?: string };
+            const ownerId = invData.user_id || '';
+            const recipientPhone = invData.recipient_phone ? normalizePhone(invData.recipient_phone) : null;
+            const recipientEmail = invData.recipient_email?.trim() || null;
+            const receiverIds = await findReceiverIds({
+              recipientPhone,
+              recipientEmail,
+              excludeId: ownerId,
+              getClient: () => this.supabase.getClient(),
+              logContext: `payment callback ${result.invoiceId}`,
+              onLog: () => {},
+            });
+            this.invoiceRealtime.emitInvoicePaid(
+              ownerId,
+              recipientPhone,
+              Array.from(receiverIds),
+              inv as unknown as Record<string, unknown>,
+            );
+          }
+        } catch {
+          /* non-fatal */
+        }
       }
 
       const success = result.statusCode === '0000';

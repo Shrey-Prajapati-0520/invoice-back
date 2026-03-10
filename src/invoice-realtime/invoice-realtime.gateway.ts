@@ -144,4 +144,56 @@ export class InvoiceRealtimeGateway
       this.logger.error(`Emit error: ${e instanceof Error ? e.message : 'Unknown'}`);
     }
   }
+
+  /**
+   * Emit invoice updated to owner and recipient(s).
+   */
+  emitInvoiceUpdated(
+    ownerUserId: string,
+    recipientPhone: string | null,
+    recipientUserIds: string[],
+    invoice: Record<string, unknown>,
+  ): void {
+    try {
+      const rooms = new Set<string>();
+      if (ownerUserId) rooms.add(`invoice:user:${ownerUserId}`);
+      if (recipientPhone) {
+        const phoneNorm = normalizePhone(recipientPhone);
+        if (phoneNorm.length >= 10) rooms.add(`invoice:phone:${phoneNorm}`);
+      }
+      recipientUserIds.forEach((uid) => uid && rooms.add(`invoice:user:${uid}`));
+      for (const room of rooms) {
+        this.server?.to(room)?.emit('invoice_updated', invoice);
+      }
+      if (rooms.size > 0) this.logger.debug(`Emitted invoice_updated to ${rooms.size} room(s)`);
+    } catch (e) {
+      this.logger.error(`Emit error: ${e instanceof Error ? e.message : 'Unknown'}`);
+    }
+  }
+
+  /**
+   * Emit invoice paid to owner and recipient(s).
+   */
+  emitInvoicePaid(
+    ownerUserId: string,
+    recipientPhone: string | null,
+    recipientUserIds: string[],
+    invoice: Record<string, unknown>,
+  ): void {
+    try {
+      const rooms = new Set<string>();
+      if (ownerUserId) rooms.add(`invoice:user:${ownerUserId}`);
+      if (recipientPhone) {
+        const phoneNorm = normalizePhone(recipientPhone);
+        if (phoneNorm.length >= 10) rooms.add(`invoice:phone:${phoneNorm}`);
+      }
+      recipientUserIds.forEach((uid) => uid && rooms.add(`invoice:user:${uid}`));
+      for (const room of rooms) {
+        this.server?.to(room)?.emit('invoice_paid', invoice);
+      }
+      if (rooms.size > 0) this.logger.debug(`Emitted invoice_paid to ${rooms.size} room(s)`);
+    } catch (e) {
+      this.logger.error(`Emit error: ${e instanceof Error ? e.message : 'Unknown'}`);
+    }
+  }
 }

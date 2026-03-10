@@ -488,9 +488,30 @@ export class InvoicesController {
       .update(body)
       .eq('id', id)
       .eq('user_id', req.user.id)
-      .select()
+      .select(`*, customers (id, name, phone, email), invoice_items (*)`)
       .single();
     if (error) throw new BadRequestException(error.message);
+    const inv = data as { recipient_phone?: string; recipient_email?: string } | null;
+    const recipientPhone = inv?.recipient_phone ? normalizePhone(inv.recipient_phone) : null;
+    const recipientEmail = inv?.recipient_email?.trim() || null;
+    const receiverIds = await findReceiverIds({
+      recipientPhone,
+      recipientEmail,
+      excludeId: req.user.id,
+      getClient: () => this.getClient(),
+      logContext: `invoice update ${id}`,
+      onLog: (msg) => this.logger.log(msg),
+    });
+    try {
+      this.invoiceRealtime.emitInvoiceUpdated(
+        req.user.id,
+        recipientPhone,
+        Array.from(receiverIds),
+        (data ?? inv) as unknown as Record<string, unknown>,
+      );
+    } catch {
+      /* non-fatal */
+    }
     return data;
   }
 
