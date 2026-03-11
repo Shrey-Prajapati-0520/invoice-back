@@ -137,6 +137,27 @@ export class InvoicesController {
     const myEmail = normalizeEmail(authEmail || metaEmail || profileEmail || '');
 
     const receivedById = new Map<string, Record<string, unknown>>();
+    const addReceived = (inv: Record<string, unknown>) => {
+      const items = (inv.invoice_items ?? []) as { qty?: number; rate?: number }[];
+      const amt = items.reduce(
+        (s: number, i: { qty?: number; rate?: number }) =>
+          s + (Number(i.qty) || 1) * (Number(i.rate) || 0),
+        0,
+      );
+      receivedById.set(String(inv.id), { ...inv, type: 'received', amount: amt });
+    };
+
+    try {
+      const { data: byReceiverId } = await client
+        .from('invoices')
+        .select(`*, customers (id, name, phone, email), invoice_items (qty, rate)`)
+        .eq('receiver_id', req.user.id)
+        .order('created_at', { ascending: false });
+      (byReceiverId ?? []).forEach((inv: Record<string, unknown>) => addReceived(inv));
+    } catch (e) {
+      this.logger.warn(`receiver_id query failed (run supabase/invoice-receiver-id.sql): ${(e as Error)?.message}`);
+    }
+
     if (myPhone) {
       const { data: byPhone } = await client
         .from('invoices')
@@ -144,15 +165,7 @@ export class InvoicesController {
         .neq('user_id', req.user.id)
         .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${myPhone}`)
         .order('created_at', { ascending: false });
-      (byPhone ?? []).forEach((inv: Record<string, unknown>) => {
-        const items = (inv.invoice_items ?? []) as { qty?: number; rate?: number }[];
-        const amt = items.reduce(
-          (s: number, i: { qty?: number; rate?: number }) =>
-            s + (Number(i.qty) || 1) * (Number(i.rate) || 0),
-          0,
-        );
-        receivedById.set(String(inv.id), { ...inv, type: 'received', amount: amt });
-      });
+      (byPhone ?? []).forEach((inv: Record<string, unknown>) => addReceived(inv));
     }
     if (myEmail) {
       const { data: byEmail } = await client
@@ -161,15 +174,7 @@ export class InvoicesController {
         .neq('user_id', req.user.id)
         .ilike('recipient_email', myEmail)
         .order('created_at', { ascending: false });
-      (byEmail ?? []).forEach((inv: Record<string, unknown>) => {
-        const items = (inv.invoice_items ?? []) as { qty?: number; rate?: number }[];
-        const amt = items.reduce(
-          (s: number, i: { qty?: number; rate?: number }) =>
-            s + (Number(i.qty) || 1) * (Number(i.rate) || 0),
-          0,
-        );
-        receivedById.set(String(inv.id), { ...inv, type: 'received', amount: amt });
-      });
+      (byEmail ?? []).forEach((inv: Record<string, unknown>) => addReceived(inv));
     }
     const received = Array.from(receivedById.values());
 
@@ -223,8 +228,20 @@ export class InvoicesController {
         'Customer must have a phone or email, or provide recipient_phone/recipient_email, so the recipient can see this invoice when they sign up.',
       );
     }
+
+    const receiverIds = await findReceiverIds({
+      recipientPhone,
+      recipientEmail,
+      excludeId: req.user.id,
+      getClient: () => this.getClient(),
+      logContext: `invoice create`,
+      onLog: (msg) => this.logger.log(msg),
+    });
+    const primaryReceiverId = receiverIds.size > 0 ? Array.from(receiverIds)[0] : null;
+
     const invoicePayload = {
       user_id: req.user.id,
+      receiver_id: primaryReceiverId,
       customer_id: body.customer_id || null,
       recipient_phone: recipientPhone,
       recipient_email: recipientEmail,
@@ -322,15 +339,7 @@ export class InvoicesController {
       /* non-fatal */
     }
 
-    // Receiver in-app notification: find User B by recipient phone/email
-    const receiverIds = await findReceiverIds({
-      recipientPhone,
-      recipientEmail,
-      excludeId: req.user.id,
-      getClient: () => this.getClient(),
-      logContext: `invoice ${resolved.number}`,
-      onLog: (msg) => this.logger.log(msg),
-    });
+    // Receiver in-app notification (receiverIds already resolved at create time)
     // Fetch receiver phones for notifications
     const receiverPhones = new Map<string, string>();
     if (receiverIds.size > 0) {
