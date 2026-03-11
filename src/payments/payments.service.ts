@@ -31,7 +31,17 @@ export class PaymentsService {
 
   getCallbackUrl(): string {
     const url = this.config.get<string>('SABPAISA_CALLBACK_URL');
-    if (url) return url.trim();
+    if (url && url.trim()) return url.trim();
+
+    // Fallback: construct from Railway/public URL when SABPAISA_CALLBACK_URL not set
+    const base =
+      this.config.get<string>('API_URL') ||
+      this.config.get<string>('RAILWAY_STATIC_URL') ||
+      process.env.RAILWAY_STATIC_URL ||
+      (process.env.RAILWAY_PUBLIC_DOMAIN
+        ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+        : '');
+    if (base) return `${base.replace(/\/$/, '')}/payments/callback`;
     return '';
   }
 

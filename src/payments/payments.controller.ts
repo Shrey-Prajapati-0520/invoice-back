@@ -54,27 +54,40 @@ export class PaymentsController {
       body.clientTxnId ||
       `INV${Date.now()}${Math.random().toString(36).slice(2, 10)}`.slice(0, 18);
 
-    const callbackUrl =
-      this.payments.getCallbackUrl() ||
-      `http://${req.headers.host || 'localhost:3000'}/payments/callback`;
+    let callbackUrl = this.payments.getCallbackUrl();
+    if (!callbackUrl) {
+      const protocol = req.headers['x-forwarded-proto'] || 'https';
+      const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+      callbackUrl = `${protocol}://${host}/payments/callback`;
+    }
 
-    const init = this.payments.createPaymentInit({
-      payerName: body.payerName,
-      payerEmail: body.payerEmail,
-      payerMobile: body.payerMobile,
-      amount: body.amount,
-      clientTxnId,
-      callbackUrl,
-      invoiceId: body.invoiceId,
-    });
+    try {
+      const init = this.payments.createPaymentInit({
+        payerName: body.payerName,
+        payerEmail: body.payerEmail,
+        payerMobile: body.payerMobile,
+        amount: body.amount,
+        clientTxnId,
+        callbackUrl,
+        invoiceId: body.invoiceId,
+      });
 
-    return {
-      redirectUrl: init.redirectUrl,
-      paymentUrl: init.paymentUrl,
-      encData: init.encData,
-      clientCode: init.clientCode,
-      clientTxnId,
-    };
+      return {
+        redirectUrl: init.redirectUrl,
+        paymentUrl: init.paymentUrl,
+        encData: init.encData,
+        clientCode: init.clientCode,
+        clientTxnId,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Payment failed';
+      if (msg.includes('SabPaisa') || msg.includes('SABPAISA')) {
+        throw new BadRequestException(
+          'Payment gateway not configured. Please contact support.',
+        );
+      }
+      throw err;
+    }
   }
 
   /**
@@ -176,6 +189,15 @@ export class PaymentsController {
 <h1 class="${success ? 'success' : 'fail'}">${success ? '✓ Payment Successful' : '✗ Payment Failed'}</h1>
 <p>${result.sabpaisaMessage || (success ? 'Your payment was completed.' : 'Please try again.')}</p>
 <p style="font-size:14px;color:#666">You can close this window and return to the app.</p>
+<script>
+(function(){
+  try {
+    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+      window.ReactNativeWebView.postMessage(${success ? '"PAYMENT_SUCCESS"' : '"PAYMENT_FAILED"'});
+    }
+  } catch(e){}
+})();
+</script>
 </body>
 </html>`;
 
