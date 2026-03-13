@@ -46,6 +46,13 @@ export class PushTokensController {
 
     const client = this.getClient();
     const now = new Date().toISOString();
+    const payload = {
+      user_id: req.user.id,
+      token,
+      phone: phone || null,
+      last_used: now,
+      updated_at: now,
+    };
 
     const { data: existing } = await client
       .from('push_tokens')
@@ -59,38 +66,32 @@ export class PushTokensController {
       }
       const { error } = await client
         .from('push_tokens')
-        .update({
-          user_id: req.user.id,
-          phone: phone || null,
-          last_used: now,
-          updated_at: now,
-        })
+        .update(payload)
         .eq('token', token);
       if (error) throw new BadRequestException(error.message);
     } else {
-      const { error } = await client.from('push_tokens').insert({
-        user_id: req.user.id,
-        token,
-        phone: phone || null,
-        last_used: now,
-        updated_at: now,
-      });
+      const { error } = await client.from('push_tokens').insert(payload);
       if (error) {
         if (error.code === '23505') {
           const { error: updErr } = await client
             .from('push_tokens')
-            .update({
-              user_id: req.user.id,
-              phone: phone || null,
-              last_used: now,
-              updated_at: now,
-            })
+            .update(payload)
             .eq('token', token);
           if (updErr) throw new BadRequestException(updErr.message);
         } else {
           throw new BadRequestException(error.message);
         }
       }
+    }
+
+    // Dual-write to profiles.expo_push_token (fallback when push_tokens is empty)
+    try {
+      await client
+        .from('profiles')
+        .update({ expo_push_token: token })
+        .eq('id', req.user.id);
+    } catch {
+      /* non-fatal; push_tokens is primary */
     }
 
     return { success: true };
