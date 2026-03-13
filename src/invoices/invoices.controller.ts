@@ -380,18 +380,16 @@ export class InvoicesController {
       }
     }
 
-    // Receiver email: send email to customer if they have an email
+    // Receiver email: send in background (don't block response – same as quotation flow)
     if (customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
-      try {
-        await this.mail.sendInvoiceNotificationToReceiver({
+      this.mail
+        .sendInvoiceNotificationToReceiver({
           to: customerEmail,
           senderName: senderName,
           invoiceNumber: resolved.number,
           amount: amountStr,
-        });
-      } catch {
-        // Non-fatal; invoice was created successfully
-      }
+        })
+        .catch(() => {});
     }
 
     // Push notifications: sender and receiver (supports multiple devices per user)
