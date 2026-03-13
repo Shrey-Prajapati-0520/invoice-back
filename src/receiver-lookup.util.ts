@@ -64,7 +64,7 @@ export async function findReceiverIds(options: ReceiverLookupOptions): Promise<S
     }
   }
 
-  // Step 3: Email lookup
+  // Step 3: Email lookup (profiles table)
   if (recipientEmail) {
     const normEmail = normalizeEmail(recipientEmail);
     if (normEmail) {
@@ -77,6 +77,25 @@ export async function findReceiverIds(options: ReceiverLookupOptions): Promise<S
         (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(p.id));
       } catch {
         /* non-fatal */
+      }
+    }
+  }
+
+  // Step 4: Fallback – auth.users (profiles.email can be empty; auth always has email)
+  if (receiverIds.size === 0 && recipientEmail) {
+    const normEmail = normalizeEmail(recipientEmail);
+    if (normEmail) {
+      try {
+        const { data: byAuthEmail } = await client.rpc('find_receiver_ids_by_email', {
+          email_input: normEmail,
+          exclude_id: excludeId,
+        });
+        if (Array.isArray(byAuthEmail)) {
+          byAuthEmail.forEach((r: { id?: string }) => r?.id && receiverIds.add(String(r.id)));
+          if (receiverIds.size > 0) log('Found via auth.users (profiles.email was empty)');
+        }
+      } catch (rpcErr) {
+        log(`auth.users fallback: ${(rpcErr as Error)?.message}`);
       }
     }
   }
