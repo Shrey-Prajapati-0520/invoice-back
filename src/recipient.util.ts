@@ -28,3 +28,8 @@ export function emailForStorage(email: string | null | undefined): string | null
   if (!e || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return null;
   return e;
 }
+
+/** Escape LIKE wildcards (% and _) for safe use in SQL LIKE patterns. */
+export function escapeForLike(value: string): string {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}

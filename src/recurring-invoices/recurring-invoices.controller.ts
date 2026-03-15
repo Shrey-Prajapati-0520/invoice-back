@@ -17,6 +17,7 @@ import {
   normalizeEmail,
   phoneForStorage,
   emailForStorage,
+  escapeForLike,
 } from '../recipient.util';
 import { findReceiverIds } from '../receiver-lookup.util';
 
@@ -117,7 +118,7 @@ export class RecurringInvoicesController {
         .from('recurring_invoices')
         .select(`*, customers (id, name, phone, email), recurring_invoice_items (*)`)
         .neq('user_id', req.user.id)
-        .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${myPhone}`);
+        .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${escapeForLike(myPhone)}`);
       (byPhone ?? []).forEach((r: Record<string, unknown>) =>
         receivedById.set(String(r.id), { ...r, type: 'received' }),
       );

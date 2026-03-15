@@ -23,6 +23,7 @@ import {
   normalizeEmail,
   phoneForStorage,
   emailForStorage,
+  escapeForLike,
 } from '../recipient.util';
 import { findReceiverIds } from '../receiver-lookup.util';
 
@@ -163,8 +164,19 @@ export class InvoicesController {
         .from('invoices')
         .select(`*, customers (id, name, phone, email), invoice_items (qty, rate)`)
         .neq('user_id', req.user.id)
-        .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${myPhone}`)
+        .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${escapeForLike(myPhone)}`)
         .order('created_at', { ascending: false });
+      const toAssignByPhone = (byPhone ?? []).filter((inv: Record<string, unknown>) => !inv.receiver_id);
+      if (toAssignByPhone.length > 0) {
+        const ids = toAssignByPhone.map((inv: Record<string, unknown>) => inv.id).filter(Boolean) as string[];
+        if (ids.length > 0) {
+          try {
+            await client.from('invoices').update({ receiver_id: req.user.id }).in('id', ids).is('receiver_id', null);
+          } catch (e) {
+            this.logger.warn(`Auto-assign receiver_id by phone failed (non-fatal): ${(e as Error)?.message}`);
+          }
+        }
+      }
       (byPhone ?? []).forEach((inv: Record<string, unknown>) => addReceived(inv));
     }
     if (myEmail) {
@@ -174,6 +186,17 @@ export class InvoicesController {
         .neq('user_id', req.user.id)
         .ilike('recipient_email', myEmail)
         .order('created_at', { ascending: false });
+      const toAssignByEmail = (byEmail ?? []).filter((inv: Record<string, unknown>) => !inv.receiver_id);
+      if (toAssignByEmail.length > 0) {
+        const ids = toAssignByEmail.map((inv: Record<string, unknown>) => inv.id).filter(Boolean) as string[];
+        if (ids.length > 0) {
+          try {
+            await client.from('invoices').update({ receiver_id: req.user.id }).in('id', ids).is('receiver_id', null);
+          } catch (e) {
+            this.logger.warn(`Auto-assign receiver_id by email failed (non-fatal): ${(e as Error)?.message}`);
+          }
+        }
+      }
       (byEmail ?? []).forEach((inv: Record<string, unknown>) => addReceived(inv));
     }
     const received = Array.from(receivedById.values());

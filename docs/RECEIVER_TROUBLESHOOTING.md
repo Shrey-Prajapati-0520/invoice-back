@@ -59,7 +59,11 @@ Invoices/quotations are matched **at list time** by `recipient_phone` and `recip
 
 If `receiver_id` is NULL on invoices, User B won't get notifications. This happens when `profiles.email` is empty (auth.users has the email but profiles may not).
 
-**Fix:** Run the SQL in `RECEIVER_DIAGNOSTIC_QUERIES.sql` (query 0) to create `find_receiver_ids_by_email`. The backend then uses this to look up User B from `auth.users` when `profiles` has no match. Redeploy the backend after adding the function.
+**Fix 1:** Run the SQL in `RECEIVER_DIAGNOSTIC_QUERIES.sql` (query 0) to create `find_receiver_ids_by_email`. The backend then uses this to look up User B from `auth.users` when `profiles` has no match. Redeploy the backend after adding the function.
+
+**Fix 2:** Run `supabase/migrations/20260311010000_handle_new_user_sync_profiles.sql` so new signups get `profiles.email` and `profiles.phone` synced from auth.users. This prevents the issue for new users.
+
+**Fix 3:** When User B fetches their received invoices, the backend auto-assigns `receiver_id` for invoices that match by `recipient_phone`/`recipient_email` but had `receiver_id` NULL. No action needed – it happens on list.
 
 ## RPC (Optional)
 

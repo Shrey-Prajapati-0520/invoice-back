@@ -5,7 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { normalizeEmail } from './recipient.util';
+import { normalizeEmail, escapeForLike } from './recipient.util';
 
 export interface ReceiverLookupOptions {
   recipientPhone: string | null;
@@ -53,7 +53,7 @@ export async function findReceiverIds(options: ReceiverLookupOptions): Promise<S
       try {
         const [exact, suffix] = await Promise.all([
           client.from('profiles').select('id').eq('phone', recipientPhone).neq('id', excludeId),
-          client.from('profiles').select('id').neq('id', excludeId).ilike('phone', `%${recipientPhone}`),
+          client.from('profiles').select('id').neq('id', excludeId).ilike('phone', `%${escapeForLike(recipientPhone)}`),
         ]);
         [...(exact.data ?? []), ...(suffix.data ?? [])].forEach((p: { id: string }) =>
           receiverIds.add(String(p.id)),

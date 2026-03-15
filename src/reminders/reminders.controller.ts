@@ -10,7 +10,7 @@ import { SupabaseService } from '../supabase.service';
 import { MailService } from '../mail/mail.service';
 import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
-import { normalizePhone } from '../recipient.util';
+import { normalizePhone, normalizeEmail, escapeForLike } from '../recipient.util';
 
 @Controller('reminders')
 @UseGuards(AuthGuard)
@@ -195,19 +195,21 @@ export class RemindersController {
         const phone10 = normalizePhone(recipientPhone);
         const [exact, suffix] = await Promise.all([
           client.from('profiles').select('id').eq('phone', phone10).neq('id', req.user.id),
-          client.from('profiles').select('id').neq('id', req.user.id).ilike('phone', `%${phone10}`),
+          client.from('profiles').select('id').neq('id', req.user.id).ilike('phone', `%${escapeForLike(phone10)}`),
         ]);
         [...(exact.data ?? []), ...(suffix.data ?? [])].forEach((p: { id: string }) => receiverIds.add(String(p.id)));
       }
       if (recipientEmail?.trim()) {
-        const { data: byEmail } = await client
-          .from('profiles')
-          .select('id')
-          .ilike('email', recipientEmail.trim())
-          .neq('id', req.user.id);
-        (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(String(p.id)));
+        const normEmail = normalizeEmail(recipientEmail);
+        if (normEmail) {
+          const { data: byEmail } = await client
+            .from('profiles')
+            .select('id')
+            .ilike('email', escapeForLike(normEmail))
+            .neq('id', req.user.id);
+          (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(String(p.id)));
+        }
       }
-    }
     for (const receiverId of receiverIds) {
       const receiverTokens = await this.push.getTokensForUser(receiverId);
       for (const token of receiverTokens) {

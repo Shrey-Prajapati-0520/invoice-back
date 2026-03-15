@@ -19,6 +19,7 @@ import {
   normalizeEmail,
   phoneForStorage,
   emailForStorage,
+  escapeForLike,
 } from '../recipient.util';
 import { findReceiverIds } from '../receiver-lookup.util';
 
@@ -127,7 +128,7 @@ export class QuotationsController {
         .from('quotations')
         .select(`*, customers (id, name, phone, email)`)
         .neq('user_id', req.user.id)
-        .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${myPhone}`)
+        .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${escapeForLike(myPhone)}`)
         .order('created_at', { ascending: false });
       (byPhone ?? []).forEach((quo: Record<string, unknown>) => receivedById.set(String(quo.id), { ...quo, type: 'received' }));
     }
