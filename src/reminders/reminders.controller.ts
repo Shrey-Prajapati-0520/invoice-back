@@ -210,6 +210,7 @@ export class RemindersController {
           (byEmail ?? []).forEach((p: { id: string }) => receiverIds.add(String(p.id)));
         }
       }
+    }
     for (const receiverId of receiverIds) {
       const receiverTokens = await this.push.getTokensForUser(receiverId);
       for (const token of receiverTokens) {
