@@ -202,7 +202,10 @@ export class ProfilesController {
       });
 
     if (uploadError) {
-      throw new BadRequestException(uploadError.message);
+      const msg = uploadError.message?.toLowerCase?.().includes('bucket')
+        ? 'Storage bucket "avatars" not found. Create it in Supabase Dashboard → Storage. See docs/AVATAR_BUCKET_SETUP.md'
+        : uploadError.message;
+      throw new BadRequestException(msg);
     }
 
     const {
