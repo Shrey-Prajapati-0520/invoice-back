@@ -47,5 +47,7 @@ ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
 ## 4. File size limit
 
-- Backend limits uploads to **5MB**
+- Backend accepts up to **8MB** request body (for base64 images)
+- Backend rejects images over **5MB** (decoded)
+- App resizes to max 512px before upload to avoid "request entity too large"
 - Supported formats: JPEG, PNG, WebP (from base64 data URI)
