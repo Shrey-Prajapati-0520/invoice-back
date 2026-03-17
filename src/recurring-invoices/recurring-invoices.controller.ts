@@ -99,10 +99,11 @@ export class RecurringInvoicesController {
       }
     }
 
-    const profilePhone = (profile as { phone?: string } | null)?.phone ?? metaPhone;
-    const profileEmail = (profile as { email?: string } | null)?.email ?? authEmail ?? metaEmail;
-    const myPhone = profilePhone ? normalizePhone(profilePhone) : '';
-    const myEmail = profileEmail ? (profileEmail as string).trim().toLowerCase() : '';
+    // Prefer auth identity first (like invoices/quotations) – ensures User B sees received when profile is empty
+    const profilePhone = (profile as { phone?: string } | null)?.phone;
+    const profileEmail = (profile as { email?: string } | null)?.email;
+    const myPhone = normalizePhone(metaPhone || authPhone || profilePhone || '');
+    const myEmail = normalizeEmail(authEmail || metaEmail || profileEmail || '');
 
     const { data: sentData, error: sentErr } = await client
       .from('recurring_invoices')
@@ -113,15 +114,40 @@ export class RecurringInvoicesController {
     const sent = (sentData ?? []).map((r: Record<string, unknown>) => ({ ...r, type: 'sent' }));
 
     const receivedById = new Map<string, Record<string, unknown>>();
+    const addReceived = (r: Record<string, unknown>) =>
+      receivedById.set(String(r.id), { ...r, type: 'received' });
+
+    // 1. Query by receiver_id first (permanent – User B always sees until deleted)
+    try {
+      const { data: byReceiverId } = await client
+        .from('recurring_invoices')
+        .select(`*, customers (id, name, phone, email), recurring_invoice_items (*)`)
+        .eq('receiver_id', req.user.id)
+        .order('created_at', { ascending: false });
+      (byReceiverId ?? []).forEach((r: Record<string, unknown>) => addReceived(r));
+    } catch (e) {
+      this.logger.warn(`receiver_id query failed (run migration): ${(e as Error)?.message}`);
+    }
+
+    // 2. Query by recipient_phone/email and auto-assign receiver_id for persistence
     if (myPhone) {
       const { data: byPhone } = await client
         .from('recurring_invoices')
         .select(`*, customers (id, name, phone, email), recurring_invoice_items (*)`)
         .neq('user_id', req.user.id)
         .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${escapeForLike(myPhone)}`);
-      (byPhone ?? []).forEach((r: Record<string, unknown>) =>
-        receivedById.set(String(r.id), { ...r, type: 'received' }),
-      );
+      const toAssignByPhone = (byPhone ?? []).filter((r: Record<string, unknown>) => !r.receiver_id);
+      if (toAssignByPhone.length > 0) {
+        const ids = toAssignByPhone.map((r: Record<string, unknown>) => r.id).filter(Boolean) as string[];
+        if (ids.length > 0) {
+          try {
+            await client.from('recurring_invoices').update({ receiver_id: req.user.id }).in('id', ids).is('receiver_id', null);
+          } catch (e) {
+            this.logger.warn(`Auto-assign receiver_id by phone failed (non-fatal): ${(e as Error)?.message}`);
+          }
+        }
+      }
+      (byPhone ?? []).forEach((r: Record<string, unknown>) => addReceived(r));
     }
     if (myEmail) {
       const { data: byEmail } = await client
@@ -129,9 +155,18 @@ export class RecurringInvoicesController {
         .select(`*, customers (id, name, phone, email), recurring_invoice_items (*)`)
         .neq('user_id', req.user.id)
         .ilike('recipient_email', myEmail);
-      (byEmail ?? []).forEach((r: Record<string, unknown>) =>
-        receivedById.set(String(r.id), { ...r, type: 'received' }),
-      );
+      const toAssignByEmail = (byEmail ?? []).filter((r: Record<string, unknown>) => !r.receiver_id);
+      if (toAssignByEmail.length > 0) {
+        const ids = toAssignByEmail.map((r: Record<string, unknown>) => r.id).filter(Boolean) as string[];
+        if (ids.length > 0) {
+          try {
+            await client.from('recurring_invoices').update({ receiver_id: req.user.id }).in('id', ids).is('receiver_id', null);
+          } catch (e) {
+            this.logger.warn(`Auto-assign receiver_id by email failed (non-fatal): ${(e as Error)?.message}`);
+          }
+        }
+      }
+      (byEmail ?? []).forEach((r: Record<string, unknown>) => addReceived(r));
     }
     const received = Array.from(receivedById.values());
 
@@ -197,6 +232,16 @@ export class RecurringInvoicesController {
       );
     }
 
+    const receiverIds = await findReceiverIds({
+      recipientPhone,
+      recipientEmail,
+      excludeId: req.user.id,
+      getClient: () => this.getClient(),
+      logContext: 'recurring create',
+      onLog: (msg) => this.logger.log(msg),
+    });
+    const primaryReceiverId = receiverIds.size > 0 ? Array.from(receiverIds)[0] : null;
+
     const amount = validItems.reduce(
       (sum, it) => sum + (Number(it.qty) || 1) * (Number(it.rate) || 0),
       0,
@@ -229,6 +274,7 @@ export class RecurringInvoicesController {
 
     const payload: Record<string, unknown> = {
       user_id: req.user.id,
+      receiver_id: primaryReceiverId,
       customer_id: body.customer_id,
       recipient_phone: recipientPhone,
       recipient_email: recipientEmail,

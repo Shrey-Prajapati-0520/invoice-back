@@ -123,6 +123,22 @@ export class QuotationsController {
     const myEmail = normalizeEmail(authEmail || metaEmail || profileEmail || '');
 
     const receivedById = new Map<string, Record<string, unknown>>();
+    const addReceived = (quo: Record<string, unknown>) =>
+      receivedById.set(String(quo.id), { ...quo, type: 'received' });
+
+    // 1. Query by receiver_id first (permanent – User B always sees until deleted)
+    try {
+      const { data: byReceiverId } = await client
+        .from('quotations')
+        .select(`*, customers (id, name, phone, email)`)
+        .eq('receiver_id', req.user.id)
+        .order('created_at', { ascending: false });
+      (byReceiverId ?? []).forEach((quo: Record<string, unknown>) => addReceived(quo));
+    } catch (e) {
+      this.logger.warn(`receiver_id query failed (run migration): ${(e as Error)?.message}`);
+    }
+
+    // 2. Query by recipient_phone/email and auto-assign receiver_id for persistence
     if (myPhone) {
       const { data: byPhone } = await client
         .from('quotations')
@@ -130,7 +146,18 @@ export class QuotationsController {
         .neq('user_id', req.user.id)
         .or(`recipient_phone.eq.${myPhone},recipient_phone.like.%${escapeForLike(myPhone)}`)
         .order('created_at', { ascending: false });
-      (byPhone ?? []).forEach((quo: Record<string, unknown>) => receivedById.set(String(quo.id), { ...quo, type: 'received' }));
+      const toAssignByPhone = (byPhone ?? []).filter((quo: Record<string, unknown>) => !quo.receiver_id);
+      if (toAssignByPhone.length > 0) {
+        const ids = toAssignByPhone.map((q: Record<string, unknown>) => q.id).filter(Boolean) as string[];
+        if (ids.length > 0) {
+          try {
+            await client.from('quotations').update({ receiver_id: req.user.id }).in('id', ids).is('receiver_id', null);
+          } catch (e) {
+            this.logger.warn(`Auto-assign receiver_id by phone failed (non-fatal): ${(e as Error)?.message}`);
+          }
+        }
+      }
+      (byPhone ?? []).forEach((quo: Record<string, unknown>) => addReceived(quo));
     }
     if (myEmail) {
       const { data: byEmail } = await client
@@ -139,7 +166,18 @@ export class QuotationsController {
         .neq('user_id', req.user.id)
         .ilike('recipient_email', myEmail)
         .order('created_at', { ascending: false });
-      (byEmail ?? []).forEach((quo: Record<string, unknown>) => receivedById.set(String(quo.id), { ...quo, type: 'received' }));
+      const toAssignByEmail = (byEmail ?? []).filter((quo: Record<string, unknown>) => !quo.receiver_id);
+      if (toAssignByEmail.length > 0) {
+        const ids = toAssignByEmail.map((q: Record<string, unknown>) => q.id).filter(Boolean) as string[];
+        if (ids.length > 0) {
+          try {
+            await client.from('quotations').update({ receiver_id: req.user.id }).in('id', ids).is('receiver_id', null);
+          } catch (e) {
+            this.logger.warn(`Auto-assign receiver_id by email failed (non-fatal): ${(e as Error)?.message}`);
+          }
+        }
+      }
+      (byEmail ?? []).forEach((quo: Record<string, unknown>) => addReceived(quo));
     }
     const received = Array.from(receivedById.values());
 
@@ -191,8 +229,19 @@ export class QuotationsController {
         'Customer must have a phone or email, or provide recipient_phone/recipient_email, so the recipient can see this quotation when they sign up.',
       );
     }
+    const receiverIds = await findReceiverIds({
+      recipientPhone,
+      recipientEmail,
+      excludeId: req.user.id,
+      getClient: () => this.getClient(),
+      logContext: 'quotation create',
+      onLog: (msg) => this.logger.log(msg),
+    });
+    const primaryReceiverId = receiverIds.size > 0 ? Array.from(receiverIds)[0] : null;
+
     const payload = {
       user_id: req.user.id,
+      receiver_id: primaryReceiverId,
       customer_id: body.customer_id || null,
       recipient_phone: recipientPhone,
       recipient_email: recipientEmail,
