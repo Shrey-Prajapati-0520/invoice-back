@@ -50,6 +50,40 @@ export class PaymentsController {
       );
     }
 
+    const amount = Number(body.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('amount must be a positive number');
+    }
+
+    // Security: verify user is allowed to initiate payment (sender collecting OR receiver paying)
+    const { data: inv, error: invErr } = await this.supabase.getClient().from('invoices')
+      .select('id, user_id, receiver_id, recipient_phone, recipient_email, status')
+      .eq('id', body.invoiceId)
+      .single();
+    if (invErr || !inv) {
+      throw new BadRequestException('Invoice not found');
+    }
+    if ((inv as { status?: string }).status !== 'pending') {
+      throw new BadRequestException('Invoice is already paid or not payable');
+    }
+    const invData = inv as { user_id?: string; receiver_id?: string; recipient_phone?: string; recipient_email?: string };
+    const isSender = invData.user_id === req.user.id;
+    const isReceiver = invData.receiver_id === req.user.id;
+    let matchesRecipient = false;
+    if (!isSender && !isReceiver) {
+      const { data: prof } = await this.supabase.getClient().from('profiles')
+        .select('phone, email').eq('id', req.user.id).single();
+      const myPhone = prof?.phone ? String(prof.phone).replace(/\D/g, '').slice(-10) : null;
+      const myEmail = (prof?.email || (req.user as { email?: string }).email || '').toLowerCase().trim();
+      const recPhone = invData.recipient_phone ? String(invData.recipient_phone).replace(/\D/g, '').slice(-10) : null;
+      const recEmail = (invData.recipient_email || '').toLowerCase().trim();
+      matchesRecipient = (!!myPhone && !!recPhone && (recPhone.endsWith(myPhone) || myPhone.endsWith(recPhone))) ||
+        (!!myEmail && !!recEmail && recEmail === myEmail);
+    }
+    if (!isSender && !isReceiver && !matchesRecipient) {
+      throw new BadRequestException('You are not authorized to pay this invoice');
+    }
+
     const clientTxnId =
       body.clientTxnId ||
       `INV${Date.now()}${Math.random().toString(36).slice(2, 10)}`.slice(0, 18);
