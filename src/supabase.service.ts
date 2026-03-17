@@ -12,6 +12,15 @@ export class SupabaseService {
     if (!url || !key) {
       throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY must be set');
     }
+    // Warn if key might be anon (RLS errors occur when service key is wrong)
+    try {
+      const payload = JSON.parse(Buffer.from(key.split('.')[1], 'base64').toString());
+      if (payload?.role !== 'service_role') {
+        console.warn('[SupabaseService] Key role is not service_role. RLS may block. Use service_role key from Supabase Dashboard > API.');
+      }
+    } catch {
+      /* ignore */
+    }
     this.client = createClient(url, key);
   }
 

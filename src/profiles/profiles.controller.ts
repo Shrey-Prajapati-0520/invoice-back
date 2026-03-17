@@ -202,9 +202,12 @@ export class ProfilesController {
       });
 
     if (uploadError) {
-      const msg = uploadError.message?.toLowerCase?.().includes('bucket')
-        ? 'Storage bucket "avatars" not found. Create it in Supabase Dashboard → Storage. See docs/AVATAR_BUCKET_SETUP.md'
-        : uploadError.message;
+      let msg = uploadError.message;
+      if (msg?.toLowerCase?.().includes('bucket')) {
+        msg = 'Storage bucket "avatars" not found. Create it in Supabase Dashboard → Storage. See docs/AVATAR_BUCKET_SETUP.md';
+      } else if (msg?.toLowerCase?.().includes('row-level security') || msg?.toLowerCase?.().includes('rls')) {
+        msg = 'Storage access denied. Run the migration: supabase/migrations/20260317000001_profiles_avatar_rls.sql in Supabase SQL Editor.';
+      }
       throw new BadRequestException(msg);
     }
 
@@ -219,7 +222,12 @@ export class ProfilesController {
       .select()
       .single();
 
-    if (updateError) throw new BadRequestException(updateError.message);
+    if (updateError) {
+      const msg = updateError.message?.toLowerCase?.().includes('row-level security') || updateError.message?.toLowerCase?.().includes('rls')
+        ? 'Profile update denied. Run migration 20260317000001_profiles_avatar_rls.sql in Supabase SQL Editor. Ensure SUPABASE_SERVICE_KEY is set in backend .env.'
+        : updateError.message;
+      throw new BadRequestException(msg);
+    }
     return profile;
   }
 }
