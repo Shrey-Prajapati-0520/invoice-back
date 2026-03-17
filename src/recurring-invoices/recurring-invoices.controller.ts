@@ -366,16 +366,7 @@ export class RecurringInvoicesController {
       /* non-fatal */
     }
 
-    // Receiver (User B) – find by recipient phone/email
-    const receiverIds = await findReceiverIds({
-      recipientPhone,
-      recipientEmail,
-      excludeId: req.user.id,
-      getClient: () => this.getClient(),
-      logContext: `recurring "${resolved.name}"`,
-      onLog: (msg) => this.logger.log(msg),
-    });
-
+    // Receiver (User B) – reuse receiverIds from above
     const receiverPhones = new Map<string, string>();
     if (receiverIds.size > 0) {
       const { data: profiles } = await this.getClient()

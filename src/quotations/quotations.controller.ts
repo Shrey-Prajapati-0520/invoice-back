@@ -329,15 +329,7 @@ export class QuotationsController {
       /* non-fatal */
     }
 
-    // Receiver in-app notification: find User B by recipient phone/email
-    const receiverIds = await findReceiverIds({
-      recipientPhone,
-      recipientEmail,
-      excludeId: req.user.id,
-      getClient: () => this.getClient(),
-      logContext: `quotation ${resolved.quo_number}`,
-      onLog: (msg) => this.logger.log(msg),
-    });
+    // Receiver in-app notification: reuse receiverIds from above
     const receiverPhones = new Map<string, string>();
     if (receiverIds.size > 0) {
       const { data: profiles } = await this.getClient()
