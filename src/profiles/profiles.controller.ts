@@ -214,10 +214,12 @@ export class ProfilesController {
     const {
       data: { publicUrl },
     } = this.getClient().storage.from(AVATAR_BUCKET).getPublicUrl(path);
+    // Cache-bust: same path = same URL, so add ?t= to force client to fetch new image on update
+    const avatarUrl = `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
     const { data: profile, error: updateError } = await this.getClient()
       .from('profiles')
-      .update({ avatar_url: publicUrl })
+      .update({ avatar_url: avatarUrl })
       .eq('id', req.user.id)
       .select()
       .single();

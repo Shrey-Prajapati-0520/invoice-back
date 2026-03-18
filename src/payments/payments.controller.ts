@@ -152,6 +152,7 @@ export class PaymentsController {
 <form id="sabpaisaForm" method="POST" action="${session.paymentUrl}">
   <input type="hidden" name="encData" value="${session.encData.replace(/"/g, '&quot;')}" />
   <input type="hidden" name="clientCode" value="${session.clientCode.replace(/"/g, '&quot;')}" />
+  <input type="hidden" name="ClientCode" value="${session.clientCode.replace(/"/g, '&quot;')}" />
 </form>
 <script>document.getElementById('sabpaisaForm').submit();</script>
 </body>
