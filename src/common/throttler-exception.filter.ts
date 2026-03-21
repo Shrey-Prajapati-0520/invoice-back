@@ -3,24 +3,40 @@ import {
   Catch,
   ArgumentsHost,
   HttpStatus,
-  Logger,
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
-import { Response } from 'express';
+import { Request, Response } from 'express';
+import { AuditLogService } from './audit-log.service';
+
+function getClientIp(req: Request): string | undefined {
+  const ff = req.headers?.['x-forwarded-for'];
+  if (typeof ff === 'string') return ff.split(',')[0]?.trim();
+  if (Array.isArray(ff) && ff[0]) return String(ff[0]).split(',')[0]?.trim();
+  return undefined;
+}
 
 /**
- * Ensures rate limit (429) responses are returned as JSON with a clear message.
- * Prevents any crash from throttling and gives clients a consistent format.
+ * Ensures rate limit (429) responses are returned as JSON.
+ * Audit-logs rate limit events as suspicious traffic for security monitoring.
  */
 @Catch(ThrottlerException)
 export class ThrottlerExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(ThrottlerExceptionFilter.name);
+  constructor(private readonly audit: AuditLogService) {}
 
   catch(exception: ThrottlerException, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
 
-    this.logger.debug(`Rate limit exceeded: ${exception.message}`);
+    if (this.audit) {
+      this.audit.log({
+        type: 'rate_limit',
+        path: request?.url ?? request?.path ?? 'unknown',
+        method: request?.method ?? 'UNKNOWN',
+        ip: getClientIp(request),
+        ua: request?.headers?.['user-agent'],
+      });
+    }
 
     response.status(HttpStatus.TOO_MANY_REQUESTS).json({
       statusCode: HttpStatus.TOO_MANY_REQUESTS,

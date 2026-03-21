@@ -7,14 +7,29 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { AuditLogService } from './audit-log.service';
+
+function getClientIp(req: Request): string | undefined {
+  const ff = req.headers?.['x-forwarded-for'];
+  if (typeof ff === 'string') return ff.split(',')[0]?.trim();
+  if (Array.isArray(ff) && ff[0]) return String(ff[0]).split(',')[0]?.trim();
+  return undefined;
+}
+
+function getUserId(req: Request): string | undefined {
+  const u = (req as Request & { user?: { id?: string } }).user;
+  return u?.id;
+}
 
 /**
  * Global exception filter – prevents unhandled errors from crashing the app.
- * Logs errors and returns safe JSON responses.
+ * Logs errors and returns safe JSON responses. Audit-logs API errors for security.
  */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
+
+  constructor(private readonly audit: AuditLogService) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -44,6 +59,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
         `Unhandled error: ${exception.message}`,
         exception.stack,
       );
+    }
+
+    if (status >= 400) {
+      this.audit.log({
+        type: 'api_error',
+        status,
+        path: request?.url ?? request?.path ?? 'unknown',
+        method: request?.method ?? 'UNKNOWN',
+        ip: getClientIp(request),
+        ua: request?.headers?.['user-agent'],
+        userId: getUserId(request),
+        msg: status >= 500 ? message : undefined,
+      });
     }
 
     try {

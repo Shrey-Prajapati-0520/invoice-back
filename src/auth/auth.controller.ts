@@ -5,15 +5,25 @@ import {
   Get,
   Logger,
   Post,
+  Req,
   Request,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
+import * as express from 'express';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from './auth.guard';
 import { phoneForStorage } from '../recipient.util';
+import { AuditLogService } from '../common/audit-log.service';
+
+function getClientIp(req: express.Request): string | undefined {
+  const ff = req.headers?.['x-forwarded-for'];
+  if (typeof ff === 'string') return ff.split(',')[0]?.trim();
+  if (Array.isArray(ff) && ff[0]) return String(ff[0]).split(',')[0]?.trim();
+  return undefined;
+}
 
 /** Stricter rate limit for auth routes: 5 attempts per 15 minutes */
 const AUTH_THROTTLE = { default: { limit: 5, ttl: 900000 } };
@@ -25,6 +35,7 @@ export class AuthController {
   constructor(
     private supabase: SupabaseService,
     private config: ConfigService,
+    private audit: AuditLogService,
   ) {}
 
   @Get('me')
@@ -36,6 +47,7 @@ export class AuthController {
   @Post('register')
   @Throttle(AUTH_THROTTLE)
   async register(
+    @Req() req: express.Request,
     @Body() body: { email: string; password: string; full_name?: string; phone?: string },
   ) {
     const email = body?.email?.trim?.();
@@ -57,6 +69,7 @@ export class AuthController {
       .eq('phone', phoneNorm)
       .maybeSingle();
     if (existingProfile) {
+      this.audit.log({ type: 'auth_register', success: false, email, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: 'phone_already_registered' });
       throw new BadRequestException('This phone number is already registered. Each number can only be used for one account.');
     }
 
@@ -110,10 +123,12 @@ export class AuthController {
           session = signIn.data.session;
         }
       }
+      this.audit.log({ type: 'auth_register', success: true, email, ip: getClientIp(req), ua: req.headers?.['user-agent'] });
       return { user: data.user, session };
     } catch (e) {
       if (e instanceof BadRequestException) throw e;
       const msg = e instanceof Error ? e.message : 'Registration failed. Please try again.';
+      this.audit.log({ type: 'auth_register', success: false, email, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: msg });
       this.logger.warn(`Signup failed for ${email}: ${msg}`);
       if (msg.toLowerCase().includes('database error saving new user')) {
         throw new BadRequestException(
@@ -126,7 +141,7 @@ export class AuthController {
 
   @Post('login')
   @Throttle(AUTH_THROTTLE)
-  async login(@Body() body: { email: string; password: string }) {
+  async login(@Req() req: express.Request, @Body() body: { email: string; password: string }) {
     const email = body?.email?.trim?.();
     if (!email || !body?.password) {
       throw new BadRequestException('Email and password are required');
@@ -143,14 +158,20 @@ export class AuthController {
           await this.supabase.getClient().auth.admin.updateUserById(user.id, { email_confirm: true });
           const retry = await this.supabase.getClient().auth.signInWithPassword({ email, password: body.password });
           if (!retry.error) {
+            this.audit.log({ type: 'auth_login', success: true, email, ip: getClientIp(req), ua: req.headers?.['user-agent'] });
             return { user: retry.data.user, session: retry.data.session };
           }
         }
       }
-      if (error) throw new UnauthorizedException('Invalid email or password');
+      if (error) {
+        this.audit.log({ type: 'auth_login', success: false, email, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: error.message });
+        throw new UnauthorizedException('Invalid email or password');
+      }
+      this.audit.log({ type: 'auth_login', success: true, email, ip: getClientIp(req), ua: req.headers?.['user-agent'] });
       return { user: data.user, session: data.session };
     } catch (e) {
       if (e instanceof UnauthorizedException) throw e;
+      this.audit.log({ type: 'auth_login', success: false, email, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: e instanceof Error ? e.message : 'Unknown' });
       this.logger.warn(`Login failed for ${email}: ${e instanceof Error ? e.message : 'Unknown error'}`);
       throw new UnauthorizedException('Invalid email or password');
     }
@@ -164,17 +185,21 @@ export class AuthController {
 
   @Post('refresh')
   @Throttle({ default: { limit: 30, ttl: 60000 } })
-  async refresh(@Body() body: { refresh_token: string }) {
+  async refresh(@Req() req: express.Request, @Body() body: { refresh_token: string }) {
     const { data, error } = await this.supabase
       .getClient()
       .auth.refreshSession({ refresh_token: body.refresh_token });
-    if (error) throw new UnauthorizedException(error.message);
+    if (error) {
+      this.audit.log({ type: 'auth_refresh', success: false, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: error.message });
+      throw new UnauthorizedException(error.message);
+    }
+    this.audit.log({ type: 'auth_refresh', success: true, ip: getClientIp(req), ua: req.headers?.['user-agent'] });
     return { session: data.session };
   }
 
   @Post('forgot-password')
   @Throttle(AUTH_THROTTLE)
-  async forgotPassword(@Body() body: { email: string }) {
+  async forgotPassword(@Req() req: express.Request, @Body() body: { email: string }) {
     try {
       const email = (body?.email?.trim?.() || '').toLowerCase();
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -191,10 +216,15 @@ export class AuthController {
       const { error } = await this.supabase.getClient().auth.resetPasswordForEmail(email, {
         redirectTo,
       });
-      if (error) throw new BadRequestException(error.message);
+      if (error) {
+        this.audit.log({ type: 'auth_forgot_password', success: false, email, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: error.message });
+        throw new BadRequestException(error.message);
+      }
+      this.audit.log({ type: 'auth_forgot_password', success: true, email, ip: getClientIp(req), ua: req.headers?.['user-agent'] });
       return { success: true, message: 'If an account exists, a reset link has been sent to your email. Click the link to set your new password.' };
     } catch (e) {
       if (e instanceof BadRequestException) throw e;
+      this.audit.log({ type: 'auth_forgot_password', success: false, email: body?.email?.trim?.(), ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: e instanceof Error ? e.message : 'Unknown' });
       this.logger.warn(`Forgot password failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
       throw new BadRequestException('Unable to send reset email. Please try again later.');
     }
@@ -202,7 +232,7 @@ export class AuthController {
 
   @Post('reset-password')
   @Throttle(AUTH_THROTTLE)
-  async resetPassword(@Body() body: { access_token: string; new_password: string }) {
+  async resetPassword(@Req() req: express.Request, @Body() body: { access_token: string; new_password: string }) {
     try {
       const token = body?.access_token?.trim?.();
       const newPassword = body?.new_password?.trim?.();
@@ -214,15 +244,21 @@ export class AuthController {
       }
       const { data: { user }, error: getUserError } = await this.supabase.getClient().auth.getUser(token);
       if (getUserError || !user) {
+        this.audit.log({ type: 'auth_reset_password', success: false, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: 'invalid_or_expired_token' });
         throw new UnauthorizedException('Invalid or expired reset link. Please request a new one.');
       }
       const { error } = await this.supabase.getClient().auth.admin.updateUserById(user.id, {
         password: newPassword,
       });
-      if (error) throw new UnauthorizedException(error.message);
+      if (error) {
+        this.audit.log({ type: 'auth_reset_password', success: false, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: error.message });
+        throw new UnauthorizedException(error.message);
+      }
+      this.audit.log({ type: 'auth_reset_password', success: true, ip: getClientIp(req), ua: req.headers?.['user-agent'] });
       return { success: true };
     } catch (e) {
       if (e instanceof BadRequestException || e instanceof UnauthorizedException) throw e;
+      this.audit.log({ type: 'auth_reset_password', success: false, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: e instanceof Error ? e.message : 'Unknown' });
       this.logger.warn(`Reset password failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
       throw new UnauthorizedException('Invalid or expired reset link. Please request a new one.');
     }

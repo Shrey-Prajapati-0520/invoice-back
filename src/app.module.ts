@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { HttpExceptionFilter } from './common/http-exception.filter';
+import { ThrottlerExceptionFilter } from './common/throttler-exception.filter';
 import { AppController } from './app.controller';
+import { CommonModule } from './common/common.module';
 import { AppService } from './app.service';
 import { SupabaseModule } from './supabase.module';
 import { MailModule } from './mail/mail.module';
@@ -31,6 +34,7 @@ import { ReportsModule } from './reports/reports.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    CommonModule,
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     SupabaseModule,
     MailModule,
@@ -60,6 +64,8 @@ import { ReportsModule } from './reports/reports.module';
   providers: [
     AppService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_FILTER, useClass: ThrottlerExceptionFilter },
+    { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })
 export class AppModule {}
