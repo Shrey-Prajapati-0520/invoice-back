@@ -10,9 +10,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from './auth.guard';
 import { phoneForStorage } from '../recipient.util';
+
+/** Stricter rate limit for auth routes: 5 attempts per 15 minutes */
+const AUTH_THROTTLE = { default: { limit: 5, ttl: 900000 } };
 
 @Controller('auth')
 export class AuthController {
@@ -30,13 +34,14 @@ export class AuthController {
   }
 
   @Post('register')
+  @Throttle(AUTH_THROTTLE)
   async register(
     @Body() body: { email: string; password: string; full_name?: string; phone?: string },
   ) {
     const email = body?.email?.trim?.();
     if (!email) throw new BadRequestException('Email is required');
-    if (!body?.password || body.password.length < 6) {
-      throw new BadRequestException('Password must be at least 6 characters');
+    if (!body?.password || body.password.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters');
     }
     const phone = body?.phone?.trim?.().replace(/\D/g, '') || undefined;
     if (!phone || phone.length < 10 || !/^[6-9]\d{9}$/.test(phone.slice(-10))) {
@@ -67,8 +72,8 @@ export class AuthController {
         },
       });
       if (error) throw new BadRequestException(error.message);
-      // Auto-confirm email so user can use app immediately without email verification
-      if (data.user) {
+      const skipEmailVerification = this.config.get<string>('ENABLE_EMAIL_VERIFICATION') !== 'true';
+      if (data.user && skipEmailVerification) {
         await this.supabase.getClient().auth.admin.updateUserById(data.user.id, {
           email_confirm: true,
         });
@@ -95,9 +100,8 @@ export class AuthController {
           /* non-fatal */
         }
       }
-      // signUp returns session: null when email confirmation is enabled; we confirmed above, so sign in to get a session
       let session = data.session;
-      if (!session?.access_token && data.user) {
+      if (!session?.access_token && data.user && skipEmailVerification) {
         const signIn = await this.supabase.getClient().auth.signInWithPassword({
           email,
           password: body.password,
@@ -121,6 +125,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @Throttle(AUTH_THROTTLE)
   async login(@Body() body: { email: string; password: string }) {
     const email = body?.email?.trim?.();
     if (!email || !body?.password) {
@@ -130,7 +135,8 @@ export class AuthController {
       let { data, error } = await this.supabase
         .getClient()
         .auth.signInWithPassword({ email, password: body.password });
-      if (error?.message?.toLowerCase().includes('email not confirmed')) {
+      const skipEmailVerification = this.config.get<string>('ENABLE_EMAIL_VERIFICATION') !== 'true';
+      if (error?.message?.toLowerCase().includes('email not confirmed') && skipEmailVerification) {
         const { data: users } = await this.supabase.getClient().auth.admin.listUsers({ perPage: 1000 });
         const user = users?.users?.find((u: { email?: string }) => u.email?.toLowerCase() === email);
         if (user) {
@@ -141,12 +147,12 @@ export class AuthController {
           }
         }
       }
-      if (error) throw new UnauthorizedException(error.message);
+      if (error) throw new UnauthorizedException('Invalid email or password');
       return { user: data.user, session: data.session };
     } catch (e) {
       if (e instanceof UnauthorizedException) throw e;
-      const msg = e instanceof Error ? e.message : 'Sign in failed. Please check your credentials.';
-      throw new UnauthorizedException(msg);
+      this.logger.warn(`Login failed for ${email}: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      throw new UnauthorizedException('Invalid email or password');
     }
   }
 
@@ -166,44 +172,58 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle(AUTH_THROTTLE)
   async forgotPassword(@Body() body: { email: string }) {
-    const email = (body?.email?.trim?.() || '').toLowerCase();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new BadRequestException('Valid email is required');
+    try {
+      const email = (body?.email?.trim?.() || '').toLowerCase();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new BadRequestException('Valid email is required');
+      }
+      const baseUrl = (
+        this.config.get<string>('RESET_PASSWORD_REDIRECT_URL') ||
+        this.config.get<string>('API_URL') ||
+        this.config.get<string>('RAILWAY_STATIC_URL') ||
+        process.env.RAILWAY_STATIC_URL ||
+        ''
+      ).trim();
+      const redirectTo = baseUrl ? `${baseUrl.replace(/\/$/, '')}/reset-password` : undefined;
+      const { error } = await this.supabase.getClient().auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
+      if (error) throw new BadRequestException(error.message);
+      return { success: true, message: 'If an account exists, a reset link has been sent to your email. Click the link to set your new password.' };
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      this.logger.warn(`Forgot password failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      throw new BadRequestException('Unable to send reset email. Please try again later.');
     }
-    const baseUrl = (
-      this.config.get<string>('RESET_PASSWORD_REDIRECT_URL') ||
-      this.config.get<string>('API_URL') ||
-      this.config.get<string>('RAILWAY_STATIC_URL') ||
-      process.env.RAILWAY_STATIC_URL ||
-      ''
-    ).trim();
-    const redirectTo = baseUrl ? `${baseUrl.replace(/\/$/, '')}/reset-password` : undefined;
-    const { error } = await this.supabase.getClient().auth.resetPasswordForEmail(email, {
-      redirectTo,
-    });
-    if (error) throw new BadRequestException(error.message);
-    return { success: true, message: 'If an account exists, a reset link has been sent to your email. Click the link to set your new password.' };
   }
 
   @Post('reset-password')
+  @Throttle(AUTH_THROTTLE)
   async resetPassword(@Body() body: { access_token: string; new_password: string }) {
-    const token = body?.access_token?.trim?.();
-    const newPassword = body?.new_password?.trim?.();
-    if (!token || !newPassword) {
-      throw new BadRequestException('Token and new password are required');
-    }
-    if (newPassword.length < 6) {
-      throw new BadRequestException('Password must be at least 6 characters');
-    }
-    const { data: { user }, error: getUserError } = await this.supabase.getClient().auth.getUser(token);
-    if (getUserError || !user) {
+    try {
+      const token = body?.access_token?.trim?.();
+      const newPassword = body?.new_password?.trim?.();
+      if (!token || !newPassword) {
+        throw new BadRequestException('Token and new password are required');
+      }
+      if (newPassword.length < 8) {
+        throw new BadRequestException('Password must be at least 8 characters');
+      }
+      const { data: { user }, error: getUserError } = await this.supabase.getClient().auth.getUser(token);
+      if (getUserError || !user) {
+        throw new UnauthorizedException('Invalid or expired reset link. Please request a new one.');
+      }
+      const { error } = await this.supabase.getClient().auth.admin.updateUserById(user.id, {
+        password: newPassword,
+      });
+      if (error) throw new UnauthorizedException(error.message);
+      return { success: true };
+    } catch (e) {
+      if (e instanceof BadRequestException || e instanceof UnauthorizedException) throw e;
+      this.logger.warn(`Reset password failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
       throw new UnauthorizedException('Invalid or expired reset link. Please request a new one.');
     }
-    const { error } = await this.supabase.getClient().auth.admin.updateUserById(user.id, {
-      password: newPassword,
-    });
-    if (error) throw new UnauthorizedException(error.message);
-    return { success: true };
   }
 }
