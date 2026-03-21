@@ -15,8 +15,8 @@ import { Throttle } from '@nestjs/throttler';
 import * as express from 'express';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from './auth.guard';
-import { phoneForStorage } from '../recipient.util';
 import { AuditLogService } from '../common/audit-log.service';
+import { RegisterDto, LoginDto, RefreshTokenDto, ForgotPasswordDto, ResetPasswordDto } from '../common/dto/auth.dto';
 
 function getClientIp(req: express.Request): string | undefined {
   const ff = req.headers?.['x-forwarded-for'];
@@ -46,20 +46,9 @@ export class AuthController {
 
   @Post('register')
   @Throttle(AUTH_THROTTLE)
-  async register(
-    @Req() req: express.Request,
-    @Body() body: { email: string; password: string; full_name?: string; phone?: string },
-  ) {
-    const email = body?.email?.trim?.();
-    if (!email) throw new BadRequestException('Email is required');
-    if (!body?.password || body.password.length < 8) {
-      throw new BadRequestException('Password must be at least 8 characters');
-    }
-    const phone = body?.phone?.trim?.().replace(/\D/g, '') || undefined;
-    if (!phone || phone.length < 10 || !/^[6-9]\d{9}$/.test(phone.slice(-10))) {
-      throw new BadRequestException('Please enter a valid 10-digit Indian mobile number');
-    }
-    const phoneNorm = phoneForStorage(phone) || phone.replace(/\D/g, '').slice(-10);
+  async register(@Req() req: express.Request, @Body() body: RegisterDto) {
+    const email = body.email;
+    const phoneNorm = body.phone;
 
     // One phone = one account: reject if phone already registered
     const { data: existingProfile } = await this.supabase
@@ -79,8 +68,8 @@ export class AuthController {
         password: body.password,
         options: {
           data: {
-            full_name: body.full_name?.trim?.(),
-            phone: phone || body.phone?.trim?.(),
+            full_name: body.full_name ?? undefined,
+            phone: phoneNorm,
           },
         },
       });
@@ -92,7 +81,6 @@ export class AuthController {
         });
         // Upsert profile so My Profile shows create-account data (guarantees data even if trigger fails)
         const fullName = body.full_name?.trim() || null;
-        const phoneNorm = phone ? phone.replace(/\D/g, '').slice(-10) || null : null;
         const emailVal = data.user.email?.trim() || null;
         try {
           await this.supabase
@@ -118,7 +106,7 @@ export class AuthController {
         const signIn = await this.supabase.getClient().auth.signInWithPassword({
           email,
           password: body.password,
-        });
+        } as { email: string; password: string });
         if (!signIn.error && signIn.data?.session) {
           session = signIn.data.session;
         }
@@ -141,11 +129,8 @@ export class AuthController {
 
   @Post('login')
   @Throttle(AUTH_THROTTLE)
-  async login(@Req() req: express.Request, @Body() body: { email: string; password: string }) {
-    const email = body?.email?.trim?.();
-    if (!email || !body?.password) {
-      throw new BadRequestException('Email and password are required');
-    }
+  async login(@Req() req: express.Request, @Body() body: LoginDto) {
+    const email = body.email;
     try {
       let { data, error } = await this.supabase
         .getClient()
@@ -156,7 +141,7 @@ export class AuthController {
         const user = users?.users?.find((u: { email?: string }) => u.email?.toLowerCase() === email);
         if (user) {
           await this.supabase.getClient().auth.admin.updateUserById(user.id, { email_confirm: true });
-          const retry = await this.supabase.getClient().auth.signInWithPassword({ email, password: body.password });
+          const retry = await this.supabase.getClient().auth.signInWithPassword({ email, password: body.password } as { email: string; password: string });
           if (!retry.error) {
             this.audit.log({ type: 'auth_login', success: true, email, ip: getClientIp(req), ua: req.headers?.['user-agent'] });
             return { user: retry.data.user, session: retry.data.session };
@@ -168,7 +153,7 @@ export class AuthController {
         throw new UnauthorizedException('Invalid email or password');
       }
       this.audit.log({ type: 'auth_login', success: true, email, ip: getClientIp(req), ua: req.headers?.['user-agent'] });
-      return { user: data.user, session: data.session };
+      return { user: data!.user, session: data!.session };
     } catch (e) {
       if (e instanceof UnauthorizedException) throw e;
       this.audit.log({ type: 'auth_login', success: false, email, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: e instanceof Error ? e.message : 'Unknown' });
@@ -185,7 +170,7 @@ export class AuthController {
 
   @Post('refresh')
   @Throttle({ default: { limit: 30, ttl: 60000 } })
-  async refresh(@Req() req: express.Request, @Body() body: { refresh_token: string }) {
+  async refresh(@Req() req: express.Request, @Body() body: RefreshTokenDto) {
     const { data, error } = await this.supabase
       .getClient()
       .auth.refreshSession({ refresh_token: body.refresh_token });
@@ -199,12 +184,9 @@ export class AuthController {
 
   @Post('forgot-password')
   @Throttle(AUTH_THROTTLE)
-  async forgotPassword(@Req() req: express.Request, @Body() body: { email: string }) {
+  async forgotPassword(@Req() req: express.Request, @Body() body: ForgotPasswordDto) {
     try {
-      const email = (body?.email?.trim?.() || '').toLowerCase();
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        throw new BadRequestException('Valid email is required');
-      }
+      const email = body.email;
       const baseUrl = (
         this.config.get<string>('RESET_PASSWORD_REDIRECT_URL') ||
         this.config.get<string>('API_URL') ||
@@ -232,16 +214,10 @@ export class AuthController {
 
   @Post('reset-password')
   @Throttle(AUTH_THROTTLE)
-  async resetPassword(@Req() req: express.Request, @Body() body: { access_token: string; new_password: string }) {
+  async resetPassword(@Req() req: express.Request, @Body() body: ResetPasswordDto) {
     try {
-      const token = body?.access_token?.trim?.();
-      const newPassword = body?.new_password?.trim?.();
-      if (!token || !newPassword) {
-        throw new BadRequestException('Token and new password are required');
-      }
-      if (newPassword.length < 8) {
-        throw new BadRequestException('Password must be at least 8 characters');
-      }
+      const token = body.access_token;
+      const newPassword = body.new_password;
       const { data: { user }, error: getUserError } = await this.supabase.getClient().auth.getUser(token);
       if (getUserError || !user) {
         this.audit.log({ type: 'auth_reset_password', success: false, ip: getClientIp(req), ua: req.headers?.['user-agent'], reason: 'invalid_or_expired_token' });

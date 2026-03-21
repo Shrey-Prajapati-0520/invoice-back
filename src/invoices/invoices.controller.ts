@@ -18,6 +18,7 @@ import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
 import { InvoiceRealtimeGateway } from '../invoice-realtime/invoice-realtime.gateway';
 import {
   normalizePhone,
@@ -469,7 +470,7 @@ export class InvoicesController {
   @Get(':id')
   async get(
     @Request() req: { user: { id: string; email?: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
   ) {
     const client = this.getClient();
     const { data: inv, error } = await client
@@ -502,7 +503,7 @@ export class InvoicesController {
   @Patch(':id')
   async update(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
     @Body()
     body: Partial<{
       customer_id: string;
@@ -550,7 +551,7 @@ export class InvoicesController {
   @Delete(':id')
   async delete(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
   ) {
     const { data, error } = await this.getClient()
       .from('invoices')
@@ -566,7 +567,7 @@ export class InvoicesController {
   @Post(':id/items')
   async addItem(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
     @Body() body: { name: string; qty?: number; rate?: number; sort_order?: number },
   ) {
     const { data: inv } = await this.getClient()
@@ -595,8 +596,8 @@ export class InvoicesController {
   @Delete(':id/items/:itemId')
   async removeItem(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
-    @Param('itemId') itemId: string,
+    @Param('id', ParseUuidPipe) id: string,
+    @Param('itemId', new ParseUuidPipe('itemId')) itemId: string,
   ) {
     const { data: inv } = await this.getClient()
       .from('invoices')

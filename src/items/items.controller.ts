@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { CreateItemDto, UpdateItemDto } from '../common/dto/item.dto';
+import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
 
 @Controller('items')
 @UseGuards(AuthGuard)
@@ -32,22 +34,16 @@ export class ItemsController {
   }
 
   @Post()
-  async create(
-    @Request() req: { user: { id: string } },
-    @Body() body: { name: string; rate?: number; description?: string },
-  ) {
-    if (!body?.name?.trim()) {
-      throw new BadRequestException('Name is required');
-    }
-    const rate = typeof body.rate === 'number' ? body.rate : parseFloat(String(body.rate || 0)) || 0;
+  async create(@Request() req: { user: { id: string } }, @Body() body: CreateItemDto) {
+    const rate = body.rate ?? 0;
     const { data, error } = await this.supabase
       .getClient()
       .from('items')
       .insert({
         user_id: req.user.id,
-        name: body.name.trim(),
+        name: body.name,
         rate,
-        description: body.description?.trim() || null,
+        description: body.description ?? null,
       })
       .select()
       .single();
@@ -58,7 +54,7 @@ export class ItemsController {
   @Get(':id')
   async get(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
   ) {
     const { data, error } = await this.supabase
       .getClient()
@@ -74,13 +70,23 @@ export class ItemsController {
   @Patch(':id')
   async update(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
-    @Body() body: Partial<{ name: string; rate: number; description: string }>,
+    @Param('id', ParseUuidPipe) id: string,
+    @Body() body: UpdateItemDto,
   ) {
+    const updates: Record<string, unknown> = {};
+    if (body.name !== undefined) updates.name = body.name;
+    if (body.rate !== undefined) updates.rate = body.rate;
+    if (body.description !== undefined) updates.description = body.description ?? null;
+    if (Object.keys(updates).length === 0) {
+      const { data: existing } = await this.supabase.getClient().from('items')
+        .select('*').eq('id', id).eq('user_id', req.user.id).single();
+      if (!existing) throw new NotFoundException('Item not found');
+      return existing;
+    }
     const { data, error } = await this.supabase
       .getClient()
       .from('items')
-      .update(body)
+      .update(updates)
       .eq('id', id)
       .eq('user_id', req.user.id)
       .select()
@@ -92,7 +98,7 @@ export class ItemsController {
   @Delete(':id')
   async delete(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
   ) {
     const { data, error } = await this.supabase
       .getClient()

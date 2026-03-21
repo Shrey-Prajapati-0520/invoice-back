@@ -18,6 +18,8 @@ import { InvoiceRealtimeGateway } from '../invoice-realtime/invoice-realtime.gat
 import { SupabaseService } from '../supabase.service';
 import { findReceiverIds } from '../receiver-lookup.util';
 import { normalizePhone } from '../recipient.util';
+import { parseUuid } from '../common/validation/sanitize.util';
+import { safeString, MAX_NAME_LEN, MAX_EMAIL_LEN, MAX_PHONE_LEN } from '../common/validation/sanitize.util';
 
 @Controller('payments')
 export class PaymentsController {
@@ -51,7 +53,18 @@ export class PaymentsController {
         'invoiceId, payerName, payerEmail, payerMobile, amount are required',
       );
     }
-
+    const invoiceId = parseUuid(body.invoiceId);
+    if (!invoiceId) throw new BadRequestException('Invalid invoiceId');
+    const payerName = safeString(body.payerName, MAX_NAME_LEN);
+    const payerEmail = safeString(body.payerEmail, MAX_EMAIL_LEN);
+    const payerMobile = safeString(body.payerMobile, MAX_PHONE_LEN);
+    if (!payerName) throw new BadRequestException('payerName is required');
+    if (!payerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payerEmail)) {
+      throw new BadRequestException('Valid payerEmail is required');
+    }
+    if (!payerMobile || payerMobile.replace(/\D/g, '').length < 10) {
+      throw new BadRequestException('Valid payerMobile (10+ digits) is required');
+    }
     const amount = Number(body.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException('amount must be a positive number');
@@ -60,7 +73,7 @@ export class PaymentsController {
     // Security: verify user is allowed to initiate payment (sender collecting OR receiver paying)
     const { data: inv, error: invErr } = await this.supabase.getClient().from('invoices')
       .select('id, user_id, receiver_id, recipient_phone, recipient_email, status')
-      .eq('id', body.invoiceId)
+      .eq('id', invoiceId)
       .single();
     if (invErr || !inv) {
       throw new BadRequestException('Invoice not found');
@@ -87,7 +100,7 @@ export class PaymentsController {
     }
 
     const clientTxnId =
-      body.clientTxnId ||
+      (body.clientTxnId && safeString(body.clientTxnId, 50)) ||
       `INV${Date.now()}${Math.random().toString(36).slice(2, 10)}`.slice(0, 18);
 
     let callbackUrl = this.payments.getCallbackUrl();
@@ -99,13 +112,13 @@ export class PaymentsController {
 
     try {
       const init = this.payments.createPaymentInit({
-        payerName: body.payerName,
-        payerEmail: body.payerEmail,
-        payerMobile: body.payerMobile,
-        amount: body.amount,
+        payerName,
+        payerEmail,
+        payerMobile,
+        amount,
         clientTxnId,
         callbackUrl,
-        invoiceId: body.invoiceId,
+        invoiceId,
       });
 
       return {

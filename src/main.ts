@@ -1,11 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { ValidationPipe } from '@nestjs/common';
 import { json } from 'express';
 import helmet from 'helmet';
 import * as dns from 'dns';
 import { AppModule } from './app.module';
-import { HttpExceptionFilter } from './common/http-exception.filter';
-import { ThrottlerExceptionFilter } from './common/throttler-exception.filter';
 import { HttpsRedirectMiddleware } from './common/security.middleware';
 
 // Prefer IPv4 for SMTP (fixes ENETUNREACH when IPv6 is unavailable)
@@ -27,6 +26,14 @@ async function bootstrap() {
     }),
   );
   app.use(json({ limit: '8mb' }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
   app.enableCors({ origin: true, credentials: true });
   const port = Number(process.env.PORT) || 3000;
   await app.listen(port, '0.0.0.0');

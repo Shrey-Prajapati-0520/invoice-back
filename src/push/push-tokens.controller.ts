@@ -9,8 +9,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
-
-const EXPO_TOKEN_REGEX = /^(ExponentPushToken|ExpoPushToken)\[[-_a-zA-Z0-9]+\]$/;
+import { RegisterPushTokenDto } from '../common/dto/push-token.dto';
 
 @Controller('register-push-token')
 @UseGuards(AuthGuard)
@@ -25,19 +24,9 @@ export class PushTokensController {
   @Post()
   async register(
     @Request() req: { user: { id: string; email?: string; user_metadata?: { phone?: string } } },
-    @Body() body: { token: string },
+    @Body() body: RegisterPushTokenDto,
   ) {
-    const raw = body?.token;
-    if (!raw || typeof raw !== 'string') {
-      throw new BadRequestException('token is required');
-    }
-    const token = raw.trim();
-    if (!token) {
-      throw new BadRequestException('token is required');
-    }
-    if (!EXPO_TOKEN_REGEX.test(token)) {
-      throw new BadRequestException('Invalid Expo push token format');
-    }
+    const token = body.token;
 
     const meta = req.user?.user_metadata ?? {};
     const phone = meta?.phone

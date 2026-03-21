@@ -10,6 +10,9 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { UpdateProfileDto } from '../common/dto/profile.dto';
+import { isAllowedImageType, MAX_AVATAR_BYTES } from '../common/validation/sanitize.util';
+import { stripNullBytes } from '../common/validation/sanitize.util';
 
 const AVATAR_BUCKET = 'avatars';
 
@@ -91,16 +94,12 @@ export class ProfilesController {
   }
 
   @Patch('me')
-  async updateMe(
-    @Request() req: { user: { id: string } },
-    @Body()
-    body: Partial<{ full_name: string; phone: string; email: string; pincode: string; expo_push_token: string }>,
-  ) {
+  async updateMe(@Request() req: { user: { id: string } }, @Body() body: UpdateProfileDto) {
     const updates: Record<string, string | null> = {};
-    if (body.full_name !== undefined) updates.full_name = body.full_name?.trim() || null;
+    if (body.full_name !== undefined) updates.full_name = body.full_name || null;
     if (body.phone !== undefined) {
-      const digits = body.phone?.trim()?.replace(/\D/g, '') || '';
-      const newPhone = digits.length >= 10 ? digits.slice(-10) : null;
+      const digits = body.phone ? String(body.phone).replace(/\D/g, '').slice(-10) : '';
+      const newPhone = digits.length >= 10 ? digits : null;
       if (newPhone) {
         const { data: existing } = await this.getClient()
           .from('profiles')
@@ -114,11 +113,9 @@ export class ProfilesController {
       }
       updates.phone = newPhone;
     }
-    if (body.email !== undefined) updates.email = body.email?.trim() || null;
-    if (body.pincode !== undefined) updates.pincode = body.pincode?.trim() || null;
-    if (body.expo_push_token !== undefined) {
-      updates.expo_push_token = body.expo_push_token?.trim() || null;
-    }
+    if (body.email !== undefined) updates.email = body.email || null;
+    if (body.pincode !== undefined) updates.pincode = body.pincode || null;
+    if (body.expo_push_token !== undefined) updates.expo_push_token = body.expo_push_token || null;
 
     if (Object.keys(updates).length === 0) {
       const { data } = await this.getClient()
@@ -169,16 +166,22 @@ export class ProfilesController {
     @Request() req: { user: { id: string } },
     @Body() body: { imageBase64?: string },
   ) {
-    const base64 = body?.imageBase64;
-    if (!base64?.trim()) {
-      throw new BadRequestException('imageBase64 is required');
+    const raw = stripNullBytes(String(body?.imageBase64 ?? '').trim());
+    if (!raw) throw new BadRequestException('imageBase64 is required');
+
+    const match = raw.match(/^data:image\/(\w+);base64,([A-Za-z0-9+/=]+)$/);
+    if (!match) throw new BadRequestException('Invalid image format. Use data:image/png;base64,... or data:image/jpeg;base64,...');
+    const ext = match[1].toLowerCase();
+    if (!isAllowedImageType(ext)) {
+      throw new BadRequestException('Only PNG, JPEG, JPG, and WebP images are allowed');
     }
-
-    const match = base64.match(/^data:image\/(\w+);base64,(.+)$/);
-    const ext = match ? match[1] : 'jpg';
-    const buffer = Buffer.from(match ? match[2] : base64, 'base64');
-
-    if (buffer.length > 5 * 1024 * 1024) {
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(match[2], 'base64');
+    } catch {
+      throw new BadRequestException('Invalid base64 data');
+    }
+    if (buffer.length > MAX_AVATAR_BYTES) {
       throw new BadRequestException('Image must be less than 5MB');
     }
 

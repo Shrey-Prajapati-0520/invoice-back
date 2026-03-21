@@ -15,6 +15,8 @@ import {
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { phoneForStorage, emailForStorage } from '../recipient.util';
+import { CreateCustomerDto, UpdateCustomerDto } from '../common/dto/customer.dto';
+import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
 
 @Controller('customers')
 @UseGuards(AuthGuard)
@@ -41,23 +43,17 @@ export class CustomersController {
   }
 
   @Post()
-  async create(
-    @Request() req: { user: { id: string } },
-    @Body() body: { name: string; phone?: string; email?: string; initials?: string; color?: string },
-  ) {
-    if (!body?.name?.trim()) {
-      throw new BadRequestException('Name is required');
-    }
+  async create(@Request() req: { user: { id: string } }, @Body() body: CreateCustomerDto) {
     // Store only normalized phone (10 digits) so recipient matching works reliably
     const phoneNorm = phoneForStorage(body.phone) ?? null;
     const emailNorm = emailForStorage(body.email) ?? null;
     const payload = {
       user_id: req.user.id,
-      name: body.name.trim(),
+      name: body.name,
       phone: phoneNorm,
       email: emailNorm,
-      initials: body.initials?.trim() || null,
-      color: body.color || 'blue',
+      initials: body.initials ?? null,
+      color: body.color ?? 'blue',
     };
     const { data, error } = await this.getClient()
       .from('customers')
@@ -71,7 +67,7 @@ export class CustomersController {
   @Get(':id')
   async get(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
   ) {
     const { data, error } = await this.getClient()
       .from('customers')
@@ -86,16 +82,15 @@ export class CustomersController {
   @Patch(':id')
   async update(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
-    @Body() body: Partial<{ name: string; phone: string; email: string; initials: string; color: string }>,
+    @Param('id', ParseUuidPipe) id: string,
+    @Body() body: UpdateCustomerDto,
   ) {
-    const updates: Record<string, unknown> = { ...body };
-    if (body.phone !== undefined) {
-      updates.phone = phoneForStorage(body.phone) ?? null;
-    }
-    if (body.email !== undefined) {
-      updates.email = emailForStorage(body.email) || body.email?.trim() || null;
-    }
+    const updates: Record<string, unknown> = {};
+    if (body.name !== undefined) updates.name = body.name;
+    if (body.phone !== undefined) updates.phone = phoneForStorage(body.phone) ?? null;
+    if (body.email !== undefined) updates.email = emailForStorage(body.email) || body.email?.trim() || null;
+    if (body.initials !== undefined) updates.initials = body.initials ?? null;
+    if (body.color !== undefined) updates.color = body.color ?? null;
     const { data, error } = await this.getClient()
       .from('customers')
       .update(updates)
@@ -110,7 +105,7 @@ export class CustomersController {
   @Delete(':id')
   async delete(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
   ) {
     const { data, error } = await this.getClient()
       .from('customers')

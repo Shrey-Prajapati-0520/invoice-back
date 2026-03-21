@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
+import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
 
 @Controller('terms')
 @UseGuards(AuthGuard)
@@ -72,7 +73,7 @@ export class TermsController {
   @Patch(':id')
   async update(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
     @Body()
     body: Partial<{
       title: string;
@@ -120,7 +121,7 @@ export class TermsController {
   @Delete(':id')
   async delete(
     @Request() req: { user: { id: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUuidPipe) id: string,
   ) {
     const { data, error } = await this.getClient()
       .from('terms')
