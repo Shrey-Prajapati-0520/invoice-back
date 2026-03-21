@@ -138,11 +138,11 @@ export class PaymentsService {
   }
 
   async updateInvoiceStatus(invoiceId: string, status: 'paid' | 'pending') {
-    const { error } = await this.supabase
-      .getClient()
-      .from('invoices')
-      .update({ status })
-      .eq('id', invoiceId);
+    let query = this.supabase.getClient().from('invoices').update({ status }).eq('id', invoiceId);
+    if (status === 'paid') {
+      query = query.eq('status', 'pending');
+    }
+    const { error } = await query;
     if (error) throw new Error(error.message);
   }
 }

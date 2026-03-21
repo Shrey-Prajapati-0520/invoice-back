@@ -112,12 +112,14 @@ export class CustomersController {
     @Request() req: { user: { id: string } },
     @Param('id') id: string,
   ) {
-    const { error } = await this.getClient()
+    const { data, error } = await this.getClient()
       .from('customers')
       .delete()
       .eq('id', id)
-      .eq('user_id', req.user.id);
+      .eq('user_id', req.user.id)
+      .select('id');
     if (error) throw new BadRequestException(error.message);
+    if (!data?.length) throw new NotFoundException('Customer not found');
     return { success: true };
   }
 }

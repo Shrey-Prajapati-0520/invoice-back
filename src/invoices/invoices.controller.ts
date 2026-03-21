@@ -550,12 +550,14 @@ export class InvoicesController {
     @Request() req: { user: { id: string } },
     @Param('id') id: string,
   ) {
-    const { error } = await this.getClient()
+    const { data, error } = await this.getClient()
       .from('invoices')
       .delete()
       .eq('id', id)
-      .eq('user_id', req.user.id);
+      .eq('user_id', req.user.id)
+      .select('id');
     if (error) throw new BadRequestException(error.message);
+    if (!data?.length) throw new NotFoundException('Invoice not found');
     return { success: true };
   }
 
@@ -602,12 +604,14 @@ export class InvoicesController {
       .single();
     if (!inv) throw new NotFoundException('Invoice not found');
 
-    const { error } = await this.getClient()
+    const { data: deleted, error } = await this.getClient()
       .from('invoice_items')
       .delete()
       .eq('id', itemId)
-      .eq('invoice_id', id);
+      .eq('invoice_id', id)
+      .select('id');
     if (error) throw new BadRequestException(error.message);
+    if (!deleted?.length) throw new NotFoundException('Item not found');
     return { success: true };
   }
 }

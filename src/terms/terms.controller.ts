@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -121,12 +122,14 @@ export class TermsController {
     @Request() req: { user: { id: string } },
     @Param('id') id: string,
   ) {
-    const { error } = await this.getClient()
+    const { data, error } = await this.getClient()
       .from('terms')
       .delete()
       .eq('id', id)
-      .eq('user_id', req.user.id);
+      .eq('user_id', req.user.id)
+      .select('id');
     if (error) throw new BadRequestException(error.message);
+    if (!data?.length) throw new NotFoundException('Term not found');
     return { success: true };
   }
 }

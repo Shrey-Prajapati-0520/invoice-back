@@ -131,13 +131,15 @@ export class BankAccountsController {
     @Request() req: { user: { id: string } },
     @Param('id') id: string,
   ) {
-    const { error } = await this.supabase
+    const { data, error } = await this.supabase
       .getClient()
       .from('bank_accounts')
       .delete()
       .eq('id', id)
-      .eq('user_id', req.user.id);
+      .eq('user_id', req.user.id)
+      .select('id');
     if (error) throw new BadRequestException(error.message);
+    if (!data?.length) throw new NotFoundException('Bank account not found');
     return { success: true };
   }
 }
