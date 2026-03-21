@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { SupabaseService } from '../supabase.service';
 
 /**
@@ -6,6 +7,7 @@ import { SupabaseService } from '../supabase.service';
  * Stateless – no session or in-memory state required.
  */
 @Controller('health')
+@SkipThrottle()
 export class HealthController {
   constructor(private readonly supabase: SupabaseService) {}
 

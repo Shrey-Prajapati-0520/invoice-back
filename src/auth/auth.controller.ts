@@ -163,6 +163,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   async refresh(@Body() body: { refresh_token: string }) {
     const { data, error } = await this.supabase
       .getClient()

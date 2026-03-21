@@ -10,6 +10,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import * as express from 'express';
 import { PaymentsService } from './payments.service';
 import { AuthGuard } from '../auth/auth.guard';
@@ -32,6 +33,7 @@ export class PaymentsController {
    */
   @Post('create')
   @UseGuards(AuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async create(
     @Request() req: { user: { id: string; email?: string }; headers: { host?: string } },
     @Body()
@@ -128,6 +130,7 @@ export class PaymentsController {
    * Redirect page - loads in WebView, auto-submits form to SabPaisa.
    * Use full URL: {API_BASE}/payments/go/{sid}
    */
+  @SkipThrottle()
   @Get('go/:sid')
   async redirectToSabPaisa(
     @Param('sid') sid: string,
@@ -167,6 +170,7 @@ export class PaymentsController {
    * Must be publicly accessible (no AuthGuard).
    * Returns HTML so user sees result in WebView.
    */
+  @SkipThrottle()
   @Post('callback')
   async callback(
     @Body() body: { encResponse?: string },

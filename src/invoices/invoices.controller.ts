@@ -12,6 +12,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { SupabaseService } from '../supabase.service';
 import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -36,6 +37,7 @@ interface InvoiceItemDto {
 
 @Controller('invoices')
 @UseGuards(AuthGuard)
+@Throttle({ default: { limit: 60, ttl: 60000 } })
 export class InvoicesController {
   private readonly logger = new Logger(InvoicesController.name);
 

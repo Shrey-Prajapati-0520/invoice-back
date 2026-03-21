@@ -6,6 +6,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { SupabaseService } from '../supabase.service';
 import { MailService } from '../mail/mail.service';
 import { PushService } from '../push/push.service';
@@ -14,6 +15,7 @@ import { normalizePhone, normalizeEmail, escapeForLike } from '../recipient.util
 
 @Controller('reminders')
 @UseGuards(AuthGuard)
+@Throttle({ default: { limit: 5, ttl: 60000 } })
 export class RemindersController {
   constructor(
     private readonly supabase: SupabaseService,

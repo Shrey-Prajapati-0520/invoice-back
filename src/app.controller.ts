@@ -1,4 +1,5 @@
 import { Controller, Get, Header } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { AppService } from './app.service';
 
 const RESET_PASSWORD_HTML = `<!DOCTYPE html>
@@ -97,6 +98,7 @@ const RESET_PASSWORD_HTML = `<!DOCTYPE html>
 </html>`;
 
 @Controller()
+@SkipThrottle()
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
