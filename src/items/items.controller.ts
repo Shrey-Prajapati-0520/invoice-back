@@ -14,7 +14,7 @@ import {
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { CreateItemDto, UpdateItemDto } from '../common/dto/item.dto';
-import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @Controller('items')
 @UseGuards(AuthGuard)
@@ -54,7 +54,7 @@ export class ItemsController {
   @Get(':id')
   async get(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const { data, error } = await this.supabase
       .getClient()
@@ -70,7 +70,7 @@ export class ItemsController {
   @Patch(':id')
   async update(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateItemDto,
   ) {
     const updates: Record<string, unknown> = {};
@@ -98,7 +98,7 @@ export class ItemsController {
   @Delete(':id')
   async delete(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const { data, error } = await this.supabase
       .getClient()

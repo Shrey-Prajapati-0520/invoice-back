@@ -15,7 +15,7 @@ import { SupabaseService } from '../supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PushService } from '../push/push.service';
 import { AuthGuard } from '../auth/auth.guard';
-import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
+import { ParseUUIDPipe } from '@nestjs/common';
 import {
   normalizePhone,
   normalizeEmail,
@@ -413,7 +413,7 @@ export class QuotationsController {
   @Get(':id')
   async get(
     @Request() req: { user: { id: string; email?: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const client = this.getClient();
     const { data: q, error } = await client

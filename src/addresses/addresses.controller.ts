@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
-import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @Controller('addresses')
 @UseGuards(AuthGuard)
@@ -114,7 +114,7 @@ export class AddressesController {
   @Patch(':id')
   async update(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body()
     body: Partial<{
       type: string;
@@ -191,7 +191,7 @@ export class AddressesController {
   @Delete(':id')
   async delete(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const { data, error } = await this.getClient()
       .from('addresses')

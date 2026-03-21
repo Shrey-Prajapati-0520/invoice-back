@@ -16,7 +16,7 @@ import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { phoneForStorage, emailForStorage } from '../recipient.util';
 import { CreateCustomerDto, UpdateCustomerDto } from '../common/dto/customer.dto';
-import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @Controller('customers')
 @UseGuards(AuthGuard)
@@ -67,7 +67,7 @@ export class CustomersController {
   @Get(':id')
   async get(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const { data, error } = await this.getClient()
       .from('customers')
@@ -82,7 +82,7 @@ export class CustomersController {
   @Patch(':id')
   async update(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateCustomerDto,
   ) {
     const updates: Record<string, unknown> = {};
@@ -105,7 +105,7 @@ export class CustomersController {
   @Delete(':id')
   async delete(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const { data, error } = await this.getClient()
       .from('customers')

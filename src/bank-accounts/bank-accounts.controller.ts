@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase.service';
 import { AuthGuard } from '../auth/auth.guard';
-import { ParseUuidPipe } from '../common/pipes/parse-uuid.pipe';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @Controller('bank-accounts')
 @UseGuards(AuthGuard)
@@ -88,7 +88,7 @@ export class BankAccountsController {
   @Get(':id')
   async get(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const { data, error } = await this.supabase
       .getClient()
@@ -104,7 +104,7 @@ export class BankAccountsController {
   @Patch(':id')
   async update(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body()
     body: Partial<{
       account_holder: string;
@@ -130,7 +130,7 @@ export class BankAccountsController {
   @Delete(':id')
   async delete(
     @Request() req: { user: { id: string } },
-    @Param('id', ParseUuidPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const { data, error } = await this.supabase
       .getClient()
